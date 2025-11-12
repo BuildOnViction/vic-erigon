@@ -35,34 +35,34 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/execution/consensus/posv"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.
-// In Clique PoA networks (e.g. Görli), consecutive blocks might have
+// In PoSV networks (e.g. Görli), consecutive blocks might have
 // the same state root (no block subsidy, empty block). If a node crashes, the
 // chain ends up losing the recent state and needs to regenerate it from blocks
 // already in the database. The bug was that processing the block *prior* to an
 // empty one **also completes** the empty one, ending up in a known-block error.
 func TestReimportMirroredState(t *testing.T) {
-	// Initialize a Clique chain with a single signer
+	// Initialize a PoSV chain with a single signer
 	var (
-		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params2.AllCliqueProtocolChanges, params2.CliqueSnapshot, cliqueDB, log.New())
-		signer   = types.LatestSignerForChainID(nil)
+		posvDB = memdb.NewTestDB(t, kv.ConsensusDB)
+		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr   = crypto.PubkeyToAddress(key.PublicKey)
+		engine = posv.New(params2.AllPosvProtocolChanges, params2.PosvSnapshot, posvDB, log.New())
+		signer = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
-		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
+		ExtraData: make([]byte, posv.ExtraVanity+length.Addr+posv.ExtraSeal),
 		Alloc: map[common.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
-		Config: params2.AllCliqueProtocolChanges,
+		Config: params2.AllPosvProtocolChanges,
 	}
-	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
+	copy(genspec.ExtraData[posv.ExtraVanity:], addr[:])
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
@@ -78,7 +78,7 @@ func TestReimportMirroredState(t *testing.T) {
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
-		block.SetDifficulty(clique.DiffInTurn)
+		block.SetDifficulty(posv.DiffInTurn)
 
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
@@ -99,11 +99,11 @@ func TestReimportMirroredState(t *testing.T) {
 		if i > 0 {
 			header.ParentHash = chain.Blocks[i-1].Hash()
 		}
-		header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
-		header.Difficulty = clique.DiffInTurn
+		header.Extra = make([]byte, posv.ExtraVanity+posv.ExtraSeal)
+		header.Difficulty = posv.DiffInTurn
 
-		sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
-		copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
+		sig, _ := crypto.Sign(posv.SealHash(header).Bytes(), key)
+		copy(header.Extra[len(header.Extra)-posv.ExtraSeal:], sig)
 		chain.Headers[i] = header
 		chain.Blocks[i] = block.WithSeal(header)
 	}

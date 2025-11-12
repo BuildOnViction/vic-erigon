@@ -113,6 +113,21 @@ var (
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
+	// AllPosvProtocolChanges contains every protocol change (EIPs) integrated
+	// into the PoSV consensus.
+	AllPosvProtocolChanges = &chain.Config{
+		ChainID:               big.NewInt(88),
+		Consensus:             chain.PosvConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		Posv:                  &chain.PosvConfig{Period: 0, Epoch: 900},
+	}
+
 	AmoyChainConfig = readChainSpec("chainspecs/amoy.json")
 
 	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
@@ -124,6 +139,8 @@ var (
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
+
+	PosvSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 )
 
 type ConsensusSnapshotConfig struct {

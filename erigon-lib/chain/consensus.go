@@ -22,5 +22,6 @@ const (
 	AuRaConsensus   ConsensusName = "aura"
 	EtHashConsensus ConsensusName = "ethash"
 	CliqueConsensus ConsensusName = "clique"
+	PosvConsensus   ConsensusName = "posv"
 	BorConsensus    ConsensusName = "bor"
 )

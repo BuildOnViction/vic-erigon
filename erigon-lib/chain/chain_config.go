@@ -97,6 +97,7 @@ type Config struct {
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
+	Posv   *PosvConfig   `json:"posv,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
 	Bor     BorConfig       `json:"-"`
@@ -623,6 +624,17 @@ type CliqueConfig struct {
 // String implements the stringer interface, returning the consensus engine details.
 func (c *CliqueConfig) String() string {
 	return "clique"
+}
+
+// CliqueConfig is the consensus engine configs for proof-of-stake based sealing.
+type PosvConfig struct {
+	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
+	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
+}
+
+// String implements the stringer interface, returning the consensus engine details.
+func (c *PosvConfig) String() string {
+	return "posv"
 }
 
 // Looks up a config value as of a given block number (or time).

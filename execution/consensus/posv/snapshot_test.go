@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/execution/consensus/posv"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -57,16 +57,16 @@ func newTesterAccountPool() *testerAccountPool {
 	}
 }
 
-// checkpoint creates a Clique checkpoint signer section from the provided list
+// checkpoint creates a PoSV checkpoint signer section from the provided list
 // of authorized signers and embeds it into the provided header.
 func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) {
 	auths := make([]common.Address, len(signers))
 	for i, signer := range signers {
 		auths[i] = ap.address(signer)
 	}
-	sort.Sort(clique.SignersAscending(auths))
+	sort.Sort(posv.SignersAscending(auths))
 	for i, auth := range auths {
-		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.Bytes())
+		copy(header.Extra[posv.ExtraVanity+i*length.Addr:], auth.Bytes())
 	}
 }
 
@@ -85,7 +85,7 @@ func (ap *testerAccountPool) address(account string) common.Address {
 	return crypto.PubkeyToAddress(ap.accounts[account].PublicKey)
 }
 
-// sign calculates a Clique digital signature for the given block and embeds it
+// sign calculates a PoSV digital signature for the given block and embeds it
 // back into the header.
 func (ap *testerAccountPool) sign(header *types.Header, signer string) {
 	// Ensure we have a persistent key for the signer
@@ -93,12 +93,12 @@ func (ap *testerAccountPool) sign(header *types.Header, signer string) {
 		ap.accounts[signer], _ = crypto.GenerateKey()
 	}
 	// Sign the header and embed the signature in extra data
-	sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), ap.accounts[signer])
-	copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
+	sig, _ := crypto.Sign(posv.SealHash(header).Bytes(), ap.accounts[signer])
+	copy(header.Extra[len(header.Extra)-posv.ExtraSeal:], sig)
 }
 
 // testerVote represents a single block signed by a parcitular account, where
-// the account may or may not have cast a Clique vote.
+// the account may or may not have cast a PoSV vote.
 type testerVote struct {
 	signer     string
 	voted      string
@@ -107,9 +107,9 @@ type testerVote struct {
 	newbatch   bool
 }
 
-// Tests that Clique signer voting is evaluated correctly for various simple and
+// Tests that PoSV signer voting is evaluated correctly for various simple and
 // complex scenarios, as well as that a few special corner cases fail correctly.
-func TestClique(t *testing.T) {
+func TestPosv(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -360,7 +360,7 @@ func TestClique(t *testing.T) {
 			votes: []testerVote{
 				{signer: "B"},
 			},
-			failure: clique.ErrUnauthorizedSigner,
+			failure: posv.ErrUnauthorizedSigner,
 		}, {
 			name:    "An authorized signer that signed recenty should not be able to sign again",
 			signers: []string{"A", "B"},
@@ -368,7 +368,7 @@ func TestClique(t *testing.T) {
 				{signer: "A"},
 				{signer: "A"},
 			},
-			failure: clique.ErrRecentlySigned,
+			failure: posv.ErrRecentlySigned,
 		}, {
 			name:    "Recent signatures should not reset on checkpoint blocks imported in a batch",
 			epoch:   3,
@@ -379,7 +379,7 @@ func TestClique(t *testing.T) {
 				{signer: "A", checkpoint: []string{"A", "B", "C"}},
 				{signer: "A"},
 			},
-			failure: clique.ErrRecentlySigned,
+			failure: posv.ErrRecentlySigned,
 		}, {
 			// Recent signatures should not reset on checkpoint blocks imported in a new
 			// batch (https://github.com/erigontech/erigon/issues/17593). Whilst this
@@ -393,7 +393,7 @@ func TestClique(t *testing.T) {
 				{signer: "A", checkpoint: []string{"A", "B", "C"}},
 				{signer: "A", newbatch: true},
 			},
-			failure: clique.ErrRecentlySigned,
+			failure: posv.ErrRecentlySigned,
 		},
 	}
 	// Run through the scenarios and test them
@@ -419,24 +419,24 @@ func TestClique(t *testing.T) {
 			}
 			// Create the genesis block with the initial set of signers
 			genesis := &types.Genesis{
-				ExtraData: make([]byte, clique.ExtraVanity+length.Addr*len(signers)+clique.ExtraSeal),
-				Config:    params.AllCliqueProtocolChanges,
+				ExtraData: make([]byte, posv.ExtraVanity+length.Addr*len(signers)+posv.ExtraSeal),
+				Config:    params.AllPosvProtocolChanges,
 			}
 			for j, signer := range signers {
-				copy(genesis.ExtraData[clique.ExtraVanity+j*length.Addr:], signer[:])
+				copy(genesis.ExtraData[posv.ExtraVanity+j*length.Addr:], signer[:])
 			}
 
 			// Assemble a chain of headers from the cast votes
 			var config chain.Config
-			copier.Copy(&config, params.AllCliqueProtocolChanges)
-			config.Clique = &chain.CliqueConfig{
+			copier.Copy(&config, params.AllPosvProtocolChanges)
+			config.Posv = &chain.PosvConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := memdb.NewTestDB(t, kv.ConsensusDB)
+			posvDB := memdb.NewTestDB(t, kv.ConsensusDB)
 
-			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
+			engine := posv.New(&config, params.PosvSnapshot, posvDB, log.New())
 			engine.FakeDiff = true
 			checkStateRoot := true
 			// Create a pristine blockchain with the genesis injected
@@ -447,7 +447,7 @@ func TestClique(t *testing.T) {
 				gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 				if tt.votes[j].auth {
 					var nonce types.BlockNonce
-					copy(nonce[:], clique.NonceAuthVote)
+					copy(nonce[:], posv.NonceAuthVote)
 					gen.SetNonce(nonce)
 				}
 			})
@@ -461,12 +461,12 @@ func TestClique(t *testing.T) {
 				if j > 0 {
 					header.ParentHash = chain.Blocks[j-1].Hash()
 				}
-				header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
+				header.Extra = make([]byte, posv.ExtraVanity+posv.ExtraSeal)
 				if auths := tt.votes[j].checkpoint; auths != nil {
-					header.Extra = make([]byte, clique.ExtraVanity+len(auths)*length.Addr+clique.ExtraSeal)
+					header.Extra = make([]byte, posv.ExtraVanity+len(auths)*length.Addr+posv.ExtraSeal)
 					accounts.checkpoint(header, auths)
 				}
-				header.Difficulty = clique.DiffInTurn // Ignored, we just need a valid number
+				header.Difficulty = posv.DiffInTurn // Ignored, we just need a valid number
 
 				// Generate the signature, embed it into the header and the block
 				accounts.sign(header, tt.votes[j].signer)
@@ -480,7 +480,7 @@ func TestClique(t *testing.T) {
 				}
 				batches[len(batches)-1] = append(batches[len(batches)-1], block)
 			}
-			// Pass all the headers through clique and ensure tallying succeeds
+			// Pass all the headers through PoSV and ensure tallying succeeds
 			failed := false
 			for j := 0; j < len(batches)-1; j++ {
 				chainX := &core.ChainPack{Blocks: batches[j]}
@@ -519,7 +519,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := chain.Blocks[len(chain.Blocks)-1]
 
-			var snap *clique.Snapshot
+			var snap *posv.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 				chainReader := stagedsync.ChainReader{
 					Cfg:         &config,

@@ -38,7 +38,7 @@ import (
 type API struct {
 	// chain  consensus.ChainHeaderReader
 	db          kv.RoDB
-	clique      *Clique
+	posv        *Posv
 	logger      log.Logger
 	blockReader services.FullBlockReader
 }
@@ -50,7 +50,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
+	chain := consensuschain.NewReader(api.posv.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -64,7 +64,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.posv.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -79,14 +79,14 @@ func (api *API) GetSnapshotAtHash(ctx context.Context, hash common.Hash) (*Snaps
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
+	chain := consensuschain.NewReader(api.posv.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.posv.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]comm
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
+	chain := consensuschain.NewReader(api.posv.ChainConfig, tx, api.blockReader, api.logger)
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
@@ -115,7 +115,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]comm
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.posv.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,13 +129,13 @@ func (api *API) GetSignersAtHash(ctx context.Context, hash common.Hash) ([]commo
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
+	chain := consensuschain.NewReader(api.posv.ChainConfig, tx, api.blockReader, api.logger)
 
 	header := chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
 	}
-	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.posv.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -144,11 +144,11 @@ func (api *API) GetSignersAtHash(ctx context.Context, hash common.Hash) ([]commo
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
 func (api *API) Proposals() map[common.Address]bool {
-	api.clique.lock.RLock()
-	defer api.clique.lock.RUnlock()
+	api.posv.lock.RLock()
+	defer api.posv.lock.RUnlock()
 
 	proposals := make(map[common.Address]bool)
-	for address, auth := range api.clique.proposals {
+	for address, auth := range api.posv.proposals {
 		proposals[address] = auth
 	}
 	return proposals
@@ -157,19 +157,19 @@ func (api *API) Proposals() map[common.Address]bool {
 // Propose injects a new authorization proposal that the signer will attempt to
 // push through.
 func (api *API) Propose(address common.Address, auth bool) {
-	api.clique.lock.Lock()
-	defer api.clique.lock.Unlock()
+	api.posv.lock.Lock()
+	defer api.posv.lock.Unlock()
 
-	api.clique.proposals[address] = auth
+	api.posv.proposals[address] = auth
 }
 
 // Discard drops a currently running proposal, stopping the signer from casting
 // further votes (either for or against).
 func (api *API) Discard(address common.Address) {
-	api.clique.lock.Lock()
-	defer api.clique.lock.Unlock()
+	api.posv.lock.Lock()
+	defer api.posv.lock.Unlock()
 
-	delete(api.clique.proposals, address)
+	delete(api.posv.proposals, address)
 }
 
 type status struct {
@@ -188,7 +188,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	chain := consensuschain.NewReader(api.clique.ChainConfig, tx, api.blockReader, api.logger)
+	chain := consensuschain.NewReader(api.posv.ChainConfig, tx, api.blockReader, api.logger)
 
 	var (
 		numBlocks = uint64(64)
@@ -196,7 +196,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 		diff      = uint64(0)
 		optimals  = 0
 	)
-	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.posv.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (api *API) Status(ctx context.Context) (*status, error) {
 			optimals++
 		}
 		diff += h.Difficulty.Uint64()
-		sealer, err := api.clique.Author(h)
+		sealer, err := api.posv.Author(h)
 		if err != nil {
 			return nil, err
 		}

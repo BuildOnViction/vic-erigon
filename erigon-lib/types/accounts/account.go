@@ -46,6 +46,7 @@ const (
 	MimetypeDataWithValidator = "data/validator"
 	MimetypeTypedData         = "data/typed"
 	MimetypeClique            = "application/x-clique-header"
+	MimetypePosv              = "application/x-posv-header"
 	MimetypeBor               = "application/x-bor-header"
 	MimetypeTextPlain         = "text/plain"
 )

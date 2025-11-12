@@ -58,7 +58,7 @@ type Tally struct {
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config *chain.CliqueConfig // Consensus engine parameters to fine tune behavior
+	config *chain.PosvConfig // Consensus engine parameters to fine tune behavior
 
 	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
 	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
@@ -78,7 +78,7 @@ func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(config *chain.CliqueConfig, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
+func newSnapshot(config *chain.PosvConfig, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{
 		config:  config,
 		Number:  number,
@@ -96,13 +96,13 @@ func newSnapshot(config *chain.CliqueConfig, number uint64, hash common.Hash, si
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.PosvConfig, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blob, err := tx.GetOne(kv.CliqueSeparate, SnapshotFullKey(num, hash))
+	blob, err := tx.GetOne(kv.PosvSeparate, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -125,9 +125,9 @@ func lastSnapshot(db kv.RwDB, logger log.Logger) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
+	lastEnc, err := tx.GetOne(kv.PosvLastSnapshot, LastSnapshotKey())
 	if err != nil {
-		return 0, fmt.Errorf("failed check last clique snapshot: %w", err)
+		return 0, fmt.Errorf("failed check last posv snapshot: %w", err)
 	}
 	if len(lastEnc) == 0 {
 		return 0, ErrNotFound
@@ -149,7 +149,7 @@ func (s *Snapshot) store(db kv.RwDB) error {
 		return err
 	}
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.CliqueSeparate, SnapshotFullKey(s.Number, s.Hash), blob)
+		return tx.Put(kv.PosvSeparate, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
 

@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package clique implements the proof-of-authority consensus engine.
+// Package posv implements the proof-of-authority consensus engine.
 package posv
 
 import (
@@ -63,7 +63,7 @@ const (
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
 
-// Clique proof-of-authority protocol constants.
+// PoSV proof-of-stake protocol constants.
 var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
@@ -174,11 +174,10 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.
 	return signer, nil
 }
 
-// Clique is the proof-of-authority consensus engine proposed to support the
-// Ethereum testnet following the Ropsten attacks.
-type Clique struct {
+// Posv is the proof-of-stake consensus engine to support Viction network.
+type Posv struct {
 	ChainConfig    *chain.Config
-	config         *chain.CliqueConfig             // Consensus engine configuration parameters
+	config         *chain.PosvConfig               // Consensus engine configuration parameters
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
@@ -198,10 +197,10 @@ type Clique struct {
 	logger log.Logger
 }
 
-// New creates a Clique proof-of-authority consensus engine with the initial
+// New creates a PoSV proof-of-stake consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
-	config := cfg.Clique
+func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posvDB kv.RwDB, logger log.Logger) *Posv {
+	config := cfg.Posv
 
 	// Set any missing consensus parameters to their defaults
 	conf := *config
@@ -214,11 +213,11 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 
 	exitCh := make(chan struct{})
 
-	c := &Clique{
+	c := &Posv{
 		ChainConfig:    cfg,
 		config:         &conf,
 		snapshotConfig: snapshotConfig,
-		DB:             cliqueDB,
+		DB:             posvDB,
 		recents:        recents,
 		signatures:     signatures,
 		proposals:      make(map[common.Address]bool),
@@ -227,15 +226,15 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 	}
 
 	// warm the cache
-	snapNum, err := lastSnapshot(cliqueDB, logger)
+	snapNum, err := lastSnapshot(posvDB, logger)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
-			logger.Error("on Clique init while getting latest snapshot", "err", err)
+			logger.Error("on PoSV init while getting latest snapshot", "err", err)
 		}
 	} else {
 		snaps, err := c.snapshots(snapNum, warmupCacheSnapshots)
 		if err != nil {
-			logger.Error("on Clique init", "err", err)
+			logger.Error("on PoSV init", "err", err)
 		}
 
 		for _, sn := range snaps {
@@ -247,20 +246,20 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 }
 
 // Type returns underlying consensus engine
-func (c *Clique) Type() chain.ConsensusName {
-	return chain.CliqueConsensus
+func (c *Posv) Type() chain.ConsensusName {
+	return chain.PosvConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the header, as well as signatures, which
 // are lru.ARCCache, which is thread-safe)
-func (c *Clique) Author(header *types.Header) (common.Address, error) {
+func (c *Posv) Author(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
+func (c *Posv) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return c.verifyHeader(chain, header, nil)
 }
 
@@ -269,13 +268,13 @@ type VerifyHeaderResponse struct {
 	Cancel  func()
 }
 
-func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
+func (c *Posv) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
 	c.recents.Add(hash, s.copy())
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
-func (c *Clique) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+func (c *Posv) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
 	if len(uncles) > 0 {
 		return errors.New("uncles not allowed")
 	}
@@ -284,7 +283,7 @@ func (c *Clique) VerifyUncles(chain consensus.ChainReader, header *types.Header,
 
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
-func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *Posv) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 
 	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
@@ -295,7 +294,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (c *Posv) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -365,18 +364,18 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
+func (c *Posv) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 }
 
-func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
+func (c *Posv) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
 ) ([]consensus.Reward, error) {
 	return []consensus.Reward{}, nil
 }
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+func (c *Posv) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
@@ -385,7 +384,7 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
+func (c *Posv) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
@@ -394,7 +393,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.He
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
+func (c *Posv) Authorize(signer common.Address, signFn SignerFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -404,7 +403,7 @@ func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+func (c *Posv) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	header := block.Header()
@@ -432,7 +431,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		return fmt.Errorf("Clique.Seal: %w", ErrUnauthorizedSigner)
+		return fmt.Errorf("Posv.Seal: %w", ErrUnauthorizedSigner)
 	}
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {
@@ -454,7 +453,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
-	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
+	sighash, err := signFn(signer, accounts.MimetypePosv, PosvRLP(header))
 	if err != nil {
 		return err
 	}
@@ -483,7 +482,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
+func (c *Posv) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
 
 	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
@@ -503,16 +502,16 @@ func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func (c *Clique) SealHash(header *types.Header) common.Hash {
+func (c *Posv) SealHash(header *types.Header) common.Hash {
 	return SealHash(header)
 }
 
-func (c *Clique) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (c *Posv) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	return false
 }
 
-// Close implements consensus.Engine. It's a noop for clique as there are no background threads.
-func (c *Clique) Close() error {
+// Close implements consensus.Engine. It's a noop for PoSV as there are no background threads.
+func (c *Posv) Close() error {
 	c.DB.Close()
 	common.SafeClose(c.exitCh)
 	return nil
@@ -520,31 +519,31 @@ func (c *Clique) Close() error {
 
 // APIs implements consensus.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
-func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
+func (c *Posv) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{
 		//{
-		//Namespace: "clique",
+		//Namespace: "posv",
 		//Version:   "1.0",
-		//Service:   &API{chain: chain, clique: c},
+		//Service:   &API{chain: chain, posv: c},
 		//Public:    false,
 		//}
 	}
 }
 
-func (c *Clique) TxDependencies(h *types.Header) [][]int {
+func (c *Posv) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
-func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader, blockReader services.FullBlockReader) rpc.API {
-	var c *Clique
-	if casted, ok := engine.(*Clique); ok {
+func NewPosvAPI(db kv.RoDB, engine consensus.EngineReader, blockReader services.FullBlockReader) rpc.API {
+	var c *Posv
+	if casted, ok := engine.(*Posv); ok {
 		c = casted
 	}
 
 	return rpc.API{
-		Namespace: "clique",
+		Namespace: "posv",
 		Version:   "1.0",
-		Service:   &API{db: db, clique: c, blockReader: blockReader},
+		Service:   &API{db: db, posv: c, blockReader: blockReader},
 		Public:    false,
 	}
 }
@@ -559,14 +558,14 @@ func SealHash(header *types.Header) (hash common.Hash) {
 	return hash
 }
 
-// CliqueRLP returns the rlp bytes which needs to be signed for the proof-of-authority
+// PosvRLP returns the rlp bytes which needs to be signed for the proof-of-authority
 // sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
 // contained at the end of the extra data.
 //
 // Note, the method requires the extra data to be at least 65 bytes, otherwise it
 // panics. This is done to avoid accidentally using both forms (signature present
 // or not), which could be abused to produce different hashes for the same header.
-func CliqueRLP(header *types.Header) []byte {
+func PosvRLP(header *types.Header) []byte {
 	b := new(bytes.Buffer)
 	encodeSigHeader(b, header)
 	return b.Bytes()
@@ -598,7 +597,7 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	}
 }
 
-func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
+func (c *Posv) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	if total <= 0 {
 		return nil, nil
 	}
@@ -611,7 +610,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	}
 	defer tx.Rollback()
 
-	cur, err1 := tx.Cursor(kv.CliqueSeparate)
+	cur, err1 := tx.Cursor(kv.PosvSeparate)
 	if err1 != nil {
 		return nil, err1
 	}
@@ -642,10 +641,10 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	return res, nil
 }
 
-func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
+func (c *Posv) GetTransferFunc() evmtypes.TransferFunc {
 	return consensus.Transfer
 }
 
-func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+func (c *Posv) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }

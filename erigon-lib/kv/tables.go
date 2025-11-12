@@ -109,6 +109,9 @@ const (
 	CliqueSeparate     = "CliqueSeparate"
 	CliqueLastSnapshot = "CliqueLastSnapshot"
 
+	PosvSeparate     = "PosvSeparate"
+	PosvLastSnapshot = "PosvLastSnapshot"
+
 	// Node database tables (see nodedb.go)
 
 	// NodeRecords stores P2P node records (ENR)
