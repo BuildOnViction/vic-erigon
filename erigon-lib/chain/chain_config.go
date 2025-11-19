@@ -73,6 +73,20 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
+	// Viction mainnet upgrades
+	TIP2019Block           *big.Int `json:"tip2019Block,omitempty"`
+	TIPSigningBlock        *big.Int `json:"tipSigningBlock,omitempty"`
+	TIPRandomizeBlock      *big.Int `json:"tipRandomizeBlock,omitempty"`
+	TIPBlacklistBlock      *big.Int `json:"tipBlacklistBlock,omitempty"`
+	TIPTRC21FeeBlock       *big.Int `json:"tipTRC21FeeBlock,omitempty"`
+	TIPFixSignerCheckBlock *big.Int `json:"tipFixSignerCheckBlock,omitempty"`
+	TIPTomoXBlock          *big.Int `json:"tipTomoXBlock,omitempty"`
+	TIPTomoXLendingBlock   *big.Int `json:"tipTomoXLendingBlock,omitempty"`
+	TIPTomoXCancelFeeBlock *big.Int `json:"tipTomoXCancelFeeBlock,omitempty"`
+
+	SaigonBlock *big.Int `json:"saigonBlock,omitempty"`
+	AtlasBlock  *big.Int `json:"atlasBlock,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
@@ -99,6 +113,8 @@ type Config struct {
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Posv   *PosvConfig   `json:"posv,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
+
+	Viction *VictionConfig `json:"viction,omitempty"`
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
@@ -630,6 +646,7 @@ func (c *CliqueConfig) String() string {
 type PosvConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
+	Gap    uint64 `json:"gap"`    // Number of blocks to prepare for next epoch
 }
 
 // String implements the stringer interface, returning the consensus engine details.

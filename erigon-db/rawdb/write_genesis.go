@@ -102,6 +102,13 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	if g.Config != nil && g.Config.Consensus == chain.PosvConsensus {
+		head.Posv = true
+		head.NewAttestors = []byte{}
+		head.Attestor = []byte{}
+		head.Penalties = []byte{}
+	}
+
 	return
 }
 

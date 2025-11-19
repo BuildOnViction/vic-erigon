@@ -94,6 +94,12 @@ type Header struct {
 	AuRaStep uint64 `json:"auraStep,omitempty"`
 	AuRaSeal []byte `json:"auraSeal,omitempty"`
 
+	// PoSV
+	Posv         bool
+	NewAttestors []byte `json:"validators,omitempty"`
+	Attestor     []byte `json:"attestor,omitempty"`
+	Penalties    []byte `json:"penalties,omitempty"`
+
 	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
 
@@ -150,6 +156,22 @@ func (h *Header) EncodingSize() int {
 		encodingSize += rlp.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
+	}
+
+	if h.Posv && h.BaseFee != nil {
+		encodingSize++
+	}
+
+	if h.NewAttestors != nil {
+		encodingSize += rlp.ListPrefixLen(len(h.NewAttestors)) + len(h.NewAttestors)
+	}
+
+	if h.Attestor != nil {
+		encodingSize += rlp.ListPrefixLen(len(h.Attestor)) + len(h.Attestor)
+	}
+
+	if h.Penalties != nil {
+		encodingSize += rlp.ListPrefixLen(len(h.Penalties)) + len(h.Penalties)
 	}
 
 	if h.BaseFee != nil {
@@ -287,6 +309,30 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.Nonce[:]); err != nil {
+			return err
+		}
+	}
+
+	if h.Posv && h.BaseFee != nil {
+		if err := rlp.Encode(w, h.Posv); err != nil {
+			return err
+		}
+	}
+
+	if h.NewAttestors != nil {
+		if err := rlp.EncodeString(h.NewAttestors, w, b[:]); err != nil {
+			return err
+		}
+	}
+
+	if h.Attestor != nil {
+		if err := rlp.EncodeString(h.Attestor, w, b[:]); err != nil {
+			return err
+		}
+	}
+
+	if h.Penalties != nil {
+		if err := rlp.EncodeString(h.Penalties, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -453,35 +499,136 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		copy(h.Nonce[:], b)
 	}
 
-	// BaseFee
-	if b, err = s.Uint256Bytes(); err != nil {
+	// Prioritize PoSV detection
+	kind, _, err := s.Kind()
+	if err != nil {
 		if errors.Is(err, rlp.EOL) {
-			h.BaseFee = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no BaseFee): %w", err)
+				return fmt.Errorf("close header struct (no Posv): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read BaseFee: %w", err)
+		return fmt.Errorf("read Posv: %w", err)
 	}
-	h.BaseFee = new(big.Int).SetBytes(b)
+	if kind == rlp.Byte {
+		_, _ = s.Bool()
+		h.Posv = true
+	}
 
-	// WithdrawalsHash
 	if b, err = s.Bytes(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			h.WithdrawalsHash = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no WithdrawalsHash): %w", err)
+				return fmt.Errorf("close header struct (no NewAttestors/BaseFee): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read WithdrawalsHash: %w", err)
+		return fmt.Errorf("read NewAttestors/BaseFee: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for WithdrawalsHash: %d", len(b))
+	h.NewAttestors = make([]byte, len(b))
+	copy(h.NewAttestors[:], b)
+
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			err := h.ResetPoSVDecodeRLP(1)
+			if err != nil {
+				return err
+			}
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no Attestor/WithdrawalsHash): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read Attestor/WithdrawalsHash: %w", err)
 	}
-	h.WithdrawalsHash = new(common.Hash)
-	h.WithdrawalsHash.SetBytes(b)
+	h.Attestor = make([]byte, len(b))
+	copy(h.Attestor[:], b)
+
+	kind, _, err = s.Kind()
+	if err != nil {
+		if errors.Is(err, rlp.EOL) {
+			err := h.ResetPoSVDecodeRLP(2)
+			if err != nil {
+				return err
+			}
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no Penalties/BlobGasUsed): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read Penalties/BlobGasUsed: %w", err)
+	}
+	if kind != rlp.String {
+		err := h.ResetPoSVDecodeRLP(2)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("read Penalties/BlobGasUsed: %w", rlp.ErrExpectedString)
+	}
+
+	// Retry PoSV
+	if !h.Posv {
+		// Since 2nd epoch onwards, Attestor always be a signature
+		if len(h.Attestor) == 65 {
+			h.Posv = true
+		}
+		// In 1st epoch, all PoSV fields are empty, and BaseFee must not be empty.
+		if len(h.NewAttestors) == 0 && len(h.Attestor) == 0 {
+			h.Posv = true
+		}
+	}
+
+	if h.Posv {
+		if b, err = s.Bytes(); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no Penalties): %w", err)
+				}
+				return nil
+			}
+			return fmt.Errorf("read Penalties: %w", err)
+		}
+		h.Penalties = make([]byte, len(b))
+		copy(h.Penalties[:], b)
+	} else {
+		err2 := h.ResetPoSVDecodeRLP(2)
+		if err2 != nil {
+			return err2
+		}
+	}
+
+	// BaseFee
+	if h.BaseFee == nil {
+		if b, err = s.Uint256Bytes(); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				h.BaseFee = nil
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no BaseFee): %w", err)
+				}
+				return nil
+			}
+			return fmt.Errorf("read BaseFee: %w", err)
+		}
+		h.BaseFee = new(big.Int).SetBytes(b)
+	}
+
+	// WithdrawalsHash
+	if h.WithdrawalsHash == nil {
+		if b, err = s.Bytes(); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				h.WithdrawalsHash = nil
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no WithdrawalsHash): %w", err)
+				}
+				return nil
+			}
+			return fmt.Errorf("read WithdrawalsHash: %w", err)
+		}
+		if len(b) != 32 {
+			return fmt.Errorf("wrong size for WithdrawalsHash: %d", len(b))
+		}
+		h.WithdrawalsHash = new(common.Hash)
+		h.WithdrawalsHash.SetBytes(b)
+	}
 
 	var blobGasUsed uint64
 	if blobGasUsed, err = s.Uint(); err != nil {
@@ -556,6 +703,25 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
+	}
+	return nil
+}
+
+func (h *Header) ResetPoSVDecodeRLP(step int) error {
+	h.Posv = false
+	errUintOverflow := errors.New("rlp: uint overflow")
+	if step >= 1 {
+		if len(h.NewAttestors) > 32 {
+			h.NewAttestors = []byte{}
+			return fmt.Errorf("read BaseFee: %w", errUintOverflow)
+		}
+		h.BaseFee = new(big.Int).SetBytes(h.NewAttestors)
+		h.NewAttestors = nil
+	}
+	if step >= 2 {
+		h.WithdrawalsHash = new(common.Hash)
+		h.WithdrawalsHash.SetBytes(h.Attestor)
+		h.Attestor = nil
 	}
 	return nil
 }
@@ -1131,6 +1297,19 @@ func CopyHeader(h *Header) *Header {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
 	}
+	if h.NewAttestors != nil {
+		cpy.NewAttestors = make([]byte, len(h.NewAttestors))
+		copy(cpy.NewAttestors, h.NewAttestors)
+	}
+	if h.Attestor != nil {
+		cpy.Attestor = make([]byte, len(h.Attestor))
+		copy(cpy.Attestor, h.Attestor)
+	}
+	if h.Penalties != nil {
+		cpy.Penalties = make([]byte, len(h.Penalties))
+		copy(cpy.Penalties, h.Penalties)
+	}
+	cpy.Posv = h.Posv
 	if h.BaseFee != nil {
 		cpy.BaseFee = new(big.Int)
 		cpy.BaseFee.Set(h.BaseFee)

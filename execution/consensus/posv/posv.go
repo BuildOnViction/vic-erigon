@@ -55,10 +55,11 @@ import (
 )
 
 const (
-	epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
-	ExtraVanity          = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
-	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
-	warmupCacheSnapshots = 20
+	epochLength            = uint64(900)            // Default number of blocks after which to checkpoint and reset the pending votes
+	ExtraVanity            = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSeal              = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+	recentBlockVerifyCache = 256                    // Number of recent blocks to cache verfication results
+	warmupCacheSnapshots   = 20
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
@@ -181,8 +182,10 @@ type Posv struct {
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
-	signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
-	recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
+	signatures       *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
+	attestSignatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
+	recents          *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
+	verifiedBlocks   *lru.ARCCache[common.Hash, bool]           // Status of recent blocks to speed up synching
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -195,6 +198,21 @@ type Posv struct {
 
 	exitCh chan struct{}
 	logger log.Logger
+
+	backend PosvBackend
+}
+
+type PosvBackend interface {
+	// Calculate and distribute reward at the end of each epoch.
+	PosvEpochReward()
+	// Penalize validators for creating bad block or not creating block at all.
+	PosvPenalize()
+	// Get eligble validators from the state.
+	PosvGetValidators()
+	// Get attestors from list of validators.
+	PosvGetAttestors()
+	// Verify list of new validators for next epoch.
+	PosvVerifyNewValidators()
 }
 
 // New creates a PoSV proof-of-stake consensus engine with the initial
@@ -210,6 +228,8 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posv
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC[common.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
 	signatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
+	attestSignatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
+	verifiedBlocks, _ := lru.NewARC[common.Hash, bool](recentBlockVerifyCache)
 
 	exitCh := make(chan struct{})
 
@@ -218,11 +238,15 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posv
 		config:         &conf,
 		snapshotConfig: snapshotConfig,
 		DB:             posvDB,
-		recents:        recents,
-		signatures:     signatures,
-		proposals:      make(map[common.Address]bool),
-		exitCh:         exitCh,
-		logger:         logger,
+
+		recents:          recents,
+		signatures:       signatures,
+		attestSignatures: attestSignatures,
+		verifiedBlocks:   verifiedBlocks,
+
+		proposals: make(map[common.Address]bool),
+		exitCh:    exitCh,
+		logger:    logger,
 	}
 
 	// warm the cache
@@ -243,6 +267,12 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posv
 	}
 
 	return c
+}
+
+// Set the backend instance into PoSV for handling some features that require accessing to chain state.
+// Must be called right after creation of PoSV.
+func (c *Posv) SetBackend(backend PosvBackend) {
+	c.backend = backend
 }
 
 // Type returns underlying consensus engine
