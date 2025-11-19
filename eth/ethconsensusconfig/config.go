@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/posv"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
@@ -71,7 +72,18 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 			}, notify, noVerify)
 		}
 	case *params.ConsensusSnapshotConfig:
-		if chainConfig.Clique != nil {
+		if chainConfig.Posv != nil {
+			var err error
+			var db kv.RwDB
+
+			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "posv", readonly, logger)
+
+			if err != nil {
+				panic(err)
+			}
+
+			eng = posv.New(chainConfig, consensusCfg, db, logger)
+		} else if chainConfig.Clique != nil {
 			if consensusCfg.InMemory {
 				nodeConfig.Dirs.DataDir = ""
 			} else {

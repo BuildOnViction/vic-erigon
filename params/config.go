@@ -72,14 +72,18 @@ var (
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	VictionGenesisHash    = common.HexToHash("0x9326145f8a2c8c00bbe13afc7d7f3d9c868b5ef39d89f2f4e9390e9720298624")
+	VictestGenesisHash    = common.HexToHash("0x296f14cfe39dd2ce9cd2dcf2bd5973c9b59531bc239e7d445c66268b172e52e3")
 	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	TestGenesisHash       = common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
 )
 
 var (
-	GnosisGenesisStateRoot = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
-	ChiadoGenesisStateRoot = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
-	TestGenesisStateRoot   = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	GnosisGenesisStateRoot  = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
+	VictionGenesisStateRoot = common.HexToHash("0x1394d6e0a3d48b3d25da2206de068a1444108280c60d360bd9d5a870004529ee")
+	VictestGenesisStateRoot = common.HexToHash("0xe697d283cb902a98b9ef94d7e5761a4fa1c49d5b81558a531ef50529c6417aa5")
+	ChiadoGenesisStateRoot  = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
+	TestGenesisStateRoot    = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
 
 var (
@@ -138,6 +142,10 @@ var (
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
+	VictionChainConfig = readChainSpec("chainspecs/viction.json")
+
+	VictestChainConfig = readChainSpec("chainspecs/victest.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	PosvSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
@@ -187,6 +195,10 @@ func ChainConfigByChainName(chainName string) *chain.Config {
 		return BorDevnetChainConfig
 	case networkname.Gnosis:
 		return GnosisChainConfig
+	case networkname.Viction:
+		return VictionChainConfig
+	case networkname.Victest:
+		return VictestChainConfig
 	case networkname.Chiado:
 		return ChiadoChainConfig
 	case networkname.Test:
@@ -214,6 +226,10 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &BorDevnetGenesisHash
 	case networkname.Gnosis:
 		return &GnosisGenesisHash
+	case networkname.Viction:
+		return &VictionGenesisHash
+	case networkname.Victest:
+		return &VictestGenesisHash
 	case networkname.Chiado:
 		return &ChiadoGenesisHash
 	case networkname.Test:
@@ -241,6 +257,10 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *chain.Config {
 		return BorDevnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
+	case genesisHash == VictionGenesisHash:
+		return VictionChainConfig
+	case genesisHash == VictestGenesisHash:
+		return VictestChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
 	default:

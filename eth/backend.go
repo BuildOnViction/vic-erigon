@@ -109,6 +109,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/posv"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/sentry_multi_client"
@@ -643,6 +644,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
+	// Inject Backend reference into PoSV
+	if backend.engine.Type() == chain.PosvConsensus {
+		backend.engine.(*posv.Posv).SetBackend(backend)
+	}
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {

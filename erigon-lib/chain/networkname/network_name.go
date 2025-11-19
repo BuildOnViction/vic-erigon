@@ -26,6 +26,8 @@ const (
 	BorMainnet          = "bor-mainnet"
 	BorDevnet           = "bor-devnet"
 	Gnosis              = "gnosis"
+	Viction             = "viction"
+	Victest             = "victest"
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
 	Test                = "test"
@@ -40,6 +42,8 @@ var All = []string{
 	BorMainnet,
 	BorDevnet,
 	Gnosis,
+	Viction,
+	Victest,
 	Chiado,
 	Test,
 }

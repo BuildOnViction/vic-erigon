@@ -106,6 +106,24 @@ func TestGenesisBlockRoots(t *testing.T) {
 	if block.Hash() != params.TestGenesisHash {
 		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
 	}
+
+	block, _, err = core.GenesisToBlock(core.VictionGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	require.NoError(err)
+	if block.Root() != params.VictionGenesisStateRoot {
+		t.Errorf("wrong Viction genesis state root, got %v, want %v", block.Root(), params.VictionGenesisStateRoot)
+	}
+	if block.Hash() != params.VictionGenesisHash {
+		t.Errorf("wrong Viction genesis hash, got %v, want %v", block.Hash(), params.VictionGenesisHash)
+	}
+
+	block, _, err = core.GenesisToBlock(core.VictestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	require.NoError(err)
+	if block.Root() != params.VictestGenesisStateRoot {
+		t.Errorf("wrong Victest genesis state root, got %v, want %v", block.Root(), params.VictestGenesisStateRoot)
+	}
+	if block.Hash() != params.VictestGenesisHash {
+		t.Errorf("wrong Victest genesis hash, got %v, want %v", block.Hash(), params.VictestGenesisHash)
+	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {

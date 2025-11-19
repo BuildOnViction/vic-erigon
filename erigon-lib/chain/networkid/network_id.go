@@ -26,6 +26,8 @@ const (
 	BorMainnetChainID = 137
 	BorDevnetChainID  = 1337
 	GnosisChainID     = 100
+	VictionChainID    = 88
+	VictestChainID    = 89
 	ChiadoChainID     = 10200
 	TestID            = 1337
 )
@@ -39,6 +41,8 @@ var All = []uint64{
 	BorMainnetChainID,
 	BorDevnetChainID,
 	GnosisChainID,
+	VictionChainID,
+	VictestChainID,
 	ChiadoChainID,
 	TestID,
 }
@@ -51,5 +55,7 @@ var NetworkNameByID = map[uint64]string{
 	AmoyChainID:       "amoy",
 	BorMainnetChainID: "bor-mainnet",
 	GnosisChainID:     "gnosis",
+	VictionChainID:    "viction",
+	VictestChainID:    "victest",
 	ChiadoChainID:     "chiado",
 }

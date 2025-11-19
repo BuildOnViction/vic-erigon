@@ -120,6 +120,21 @@ var GnosisBootnodes = []string{
 	"enode://b72d6233d50bef7b31c09f3ea39459257520178f985a872bbaa4e371ed619455b7671053ffe985af1b5fb3270606e2a49e4e67084debd75e6c9b93e227c5b01c@35.210.156.59:30303",
 }
 
+var VictionBootnodes = []string{
+	"enode://98b06c30c631ab869c25b4836684b3de632ec7db60db34920095f8039cd49076913a64565dc4d8a06569bd84afa9553b95590ba3dd86263e3b9b5657463693a7@162.19.43.250:30301",
+	"enode://4c075010c7c1199240aea58a4e570b13af374a4aa2ed0219360c6017da34ca644706426ab2c75f1da00552ef4a40245ba043854d20e7c1873306023b6790bf03@15.235.228.11:30301",
+	"enode://477afcdf9581d0f38f00b2d0376bb536a3c71b13fcfa3d6039efb19c57a69e389b819efeb516609fe3eb3c90a8ffe620e62abaf481de6b07b873cad543a635fb@162.19.103.252:30301",
+	"enode://6a03f00972d02bc1f004fd05adf9384fb05a629e69ae894eebe1b55fe667a2313b595a180418f505948f99e5c66661229f8ea1d5c12aadb16433cae3122d1d8a@3.1.61.17:30301",
+	"enode://f799bf1da9f8b25891054913d876b1dcc301284fd001078239bcb5fb408078ac89741b8039f9adb0dfbfe72dca0b753e48099de3a059c3e23dc2402434ff8fd6@13.229.196.181:30301",
+	"enode://d3a79693bf18fd5136a4b1809193e28f94400b00a65a7f21c918876d986212c8031834b332f39fb8a814fb5e90f0e413fead6953d1aa23a839bba1224e285ed6@122.248.245.143:30301",
+}
+
+var VictestBootnodes = []string{
+	"enode://77c303c0d7cd03cb0fcfee0b7fc1b162d2fcaf667dc23b416e631196c8d7bed9b937944372b4673bc3d8dcede4b37bf8e7e8855bbda76c96bba3fb573a10f1ad@162.19.43.250:30304",
+	"enode://b9b5f61ab47f3681e75240d8b86d05ab451cd47f206d1d3cb69a87c71491236cec10b8a7740ec88616199d6a76d309f41a647e2802a63a8e449773ee3a920ba4@15.235.228.11:30304",
+	"enode://0f41c53da72e07e3514efd7ce9e3f758acc2066d8ae66955e540620f7108fff91f8ebdc734b89dca14db2a70cdaf8c957579ec94e3dfdfe91b2923272f1cc099@13.214.64.64:30601",
+}
+
 var ChiadoBootnodes = []string{
 	"enode://712144ac396fd2298b3e2559e2930d7f3a36fded3addd66955224958f1845634067717ab9522757ed2948f480fc52add5676487c8378e9011a7e2c0ac2f36cc3@3.71.132.231:30303",
 	"enode://595160631241ea41b187b85716f9f9572a266daa940d74edbe3b83477264ce284d69208e61cf50e91641b1b4f9a03fa8e60eb73d435a84cf4616b1c969bc2512@3.69.35.13:30303",
@@ -167,6 +182,10 @@ func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
 		return BorMainnetBootnodes
 	case GnosisGenesisHash:
 		return GnosisBootnodes
+	case VictionGenesisHash:
+		return VictionBootnodes
+	case VictestGenesisHash:
+		return VictestBootnodes
 	case ChiadoGenesisHash:
 		return ChiadoBootnodes
 	default:
@@ -190,6 +209,10 @@ func BootnodeURLsOfChain(chain string) []string {
 		return BorMainnetBootnodes
 	case networkname.Gnosis:
 		return GnosisBootnodes
+	case networkname.Viction:
+		return VictionBootnodes
+	case networkname.Victest:
+		return VictestBootnodes
 	case networkname.Chiado:
 		return ChiadoBootnodes
 	default:
