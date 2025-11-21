@@ -25,14 +25,14 @@
     "randomizerRevealNthBlock": 850,
     "rewardFoundationAddress": "0x0000000000000000000000000000000000000068",
     "rewardFoundationPercent": 10,
-    "rewardPerEpoch": 250,
+    "rewardPerEpoch": "250000000000000000000",
     "rewardValidatorPercent": 40,
     "rewardVoterPercent": 50,
-    "trc21GasPrice": 2500,
+    "trc21GasPrice": "2500",
     "validatorMinPerEpochCount": 1,
     "validatorMaxCount": 150,
     "validatorSignInterval": 15,
     "vrc25Contract": "0x8c0faeb5C6bEd2129b8674F262Fd45c4e9468bee",
-    "vrc25GasPrice": 250000000
+    "vrc25GasPrice": "250000000"
   }
 }

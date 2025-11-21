@@ -17,60 +17,59 @@
 package chain
 
 import (
-	"math/big"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 type VictionConfig struct {
-	AtlasVRC25MinCap *big.Int `json:"atlasVRC25MinCap,omitempty"`
+	AtlasVRC25MinCap *math.Decimal256 `json:"atlasVRC25MinCap,omitempty"`
 
-	LendingContract            common.Address `json:"lendingContract,omitempty"`
-	LendingInterest            *big.Int       `json:"lendingInterest,omitempty"`
-	LendingLiquidateTradeBlock *big.Int       `json:"lendingLiquidateTradeBlock,omitempty"`
+	LendingContract            common.Address   `json:"lendingContract,omitempty"`
+	LendingInterestAmount      *math.Decimal256 `json:"lendingInterestAmount,omitempty"`
+	LendingLiquidateTradeBlock uint64           `json:"lendingLiquidateTradeBlock,omitempty"`
 
-	PenaltyComebackBlockCount *big.Int `json:"penaltyComebackBlockCount,omitempty"`
-	PenaltyEpochCount         *big.Int `json:"penaltyEpochCount,omitempty"`
+	PenaltyComebackBlockCount uint64 `json:"penaltyComebackBlockCount,omitempty"`
+	PenaltyEpochCount         uint64 `json:"penaltyEpochCount,omitempty"`
 
-	RandomizerCommitNthBlock *big.Int `json:"randomizerCommitNthBlock,omitempty"`
-	RandomizerFinaleNthBlock *big.Int `json:"randomizerFinaleNthBlock,omitempty"`
-	RandomizerRevealNthBlock *big.Int `json:"randomizerRevealNthBlock,omitempty"`
+	RandomizerCommitNthBlock uint64 `json:"randomizerCommitNthBlock,omitempty"`
+	RandomizerFinaleNthBlock uint64 `json:"randomizerFinaleNthBlock,omitempty"`
+	RandomizerRevealNthBlock uint64 `json:"randomizerRevealNthBlock,omitempty"`
 
-	RewardFoundationAddress common.Address `json:"rewardFoundationAddress,omitempty"`
-	RewardFoundationPercent *big.Int       `json:"rewardFoundationPercent,omitempty"`
-	RewardPerEpoch          *big.Int       `json:"rewardPerEpoch,omitempty"`
-	RewardValidatorPercent  *big.Int       `json:"rewardValidatorPercent,omitempty"`
-	RewardVoterPercent      *big.Int       `json:"rewardVoterPercent,omitempty"`
+	RewardFoundationAddress common.Address   `json:"rewardFoundationAddress,omitempty"`
+	RewardFoundationPercent uint64           `json:"rewardFoundationPercent,omitempty"`
+	RewardPerEpoch          *math.Decimal256 `json:"rewardPerEpoch,omitempty"`
+	RewardValidatorPercent  uint64           `json:"rewardValidatorPercent,omitempty"`
+	RewardVoterPercent      uint64           `json:"rewardVoterPercent,omitempty"`
 
-	RelayerCancelFee        *big.Int       `json:"relayerCancelFee,omitempty"`
-	RelayerContract         common.Address `json:"relayerContract,omitempty"`
-	RelayerFee              *big.Int       `json:"relayerFee,omitempty"`
-	RelayerLendingFee       *big.Int       `json:"relayerLendingFee,omitempty"`
-	RelayerLendingCancelFee *big.Int       `json:"relayerLendingCancelFee,omitempty"`
-	RelayerLockedFund       *big.Int       `json:"relayerLockedFund,omitempty"`
+	RelayerCancelFee        *math.Decimal256 `json:"relayerCancelFee,omitempty"`
+	RelayerContract         common.Address   `json:"relayerContract,omitempty"`
+	RelayerFee              *math.Decimal256 `json:"relayerFee,omitempty"`
+	RelayerLendingFee       *math.Decimal256 `json:"relayerLendingFee,omitempty"`
+	RelayerLendingCancelFee *math.Decimal256 `json:"relayerLendingCancelFee,omitempty"`
+	RelayerLockedFund       *math.Decimal256 `json:"relayerLockedFund,omitempty"`
 
-	TRC21GasPrice *big.Int `json:"trc21GasPrice,omitempty"`
+	TRC21GasPrice *math.Decimal256 `json:"trc21GasPrice,omitempty"`
 
-	SaigonFundAddress    common.Address `json:"saigonFundAddress,omitempty"`
-	SaigonFundAmount     *big.Int       `json:"saigonFundAmount,omitempty"`
-	SaigonFundInterval   *big.Int       `json:"saigonFundInterval,omitempty"`
-	SaigonFundRepeat     *big.Int       `json:"saigonFundRepeat,omitempty"`
-	SaigonRewardPerEpoch *big.Int       `json:"saigonRewardPerEpoch,omitempty"`
+	SaigonFundAddress    common.Address   `json:"saigonFundAddress,omitempty"`
+	SaigonFundAmount     *math.Decimal256 `json:"saigonFundAmount,omitempty"`
+	SaigonFundInterval   uint64           `json:"saigonFundInterval,omitempty"`
+	SaigonFundRepeat     uint64           `json:"saigonFundRepeat,omitempty"`
+	SaigonRewardPerEpoch *math.Decimal256 `json:"saigonRewardPerEpoch,omitempty"`
 
-	TomoXBaseCancelFee *big.Int       `json:"tomoxBaseCancelFee,omitempty"`
-	TomoXBaseFee       *big.Int       `json:"tomoxBaseFee,omitempty"`
-	TomoXBasePrice     *big.Int       `json:"tomoxBasePrice,omitempty"`
-	TomoXBaseTopUp     *big.Int       `json:"tomoxBaseTopUp,omitempty"`
-	TomoXBaseRecall    *big.Int       `json:"tomoxBaseRecall,omitempty"`
-	TomoXContract      common.Address `json:"tomoxContract,omitempty"`
-	TomoXRateTopUp     *big.Int       `json:"tomoxRateTopUp,omitempty"`
+	TomoXBaseCancelFee *math.Decimal256 `json:"tomoxBaseCancelFee,omitempty"`
+	TomoXBaseFee       *math.Decimal256 `json:"tomoxBaseFee,omitempty"`
+	TomoXBasePrice     *math.Decimal256 `json:"tomoxBasePrice,omitempty"`
+	TomoXBaseRecall    *math.Decimal256 `json:"tomoxBaseRecall,omitempty"`
+	TomoXContract      common.Address   `json:"tomoxContract,omitempty"`
+	TomoXTopupDenom    uint64           `json:"tomoxTopupDenom,omitempty"`
+	TomoXTopupNumer    uint64           `json:"tomoxTopupNumer,omitempty"`
 
 	ValidatorMinPerEpochCount uint64 `json:"validatorMinPerEpochCount,omitempty"`
 	ValidatorMaxCount         uint64 `json:"validatorMaxCount,omitempty"`
 	ValidatorSignInterval     uint64 `json:"validatorSignInterval,omitempty"`
 
-	VRC25GasPrice *big.Int       `json:"vrc25GasPrice,omitempty"`
-	VRC25Contract common.Address `json:"vrc25Contract,omitempty"`
+	VRC25GasPrice *math.Decimal256 `json:"vrc25GasPrice,omitempty"`
+	VRC25Contract common.Address   `json:"vrc25Contract,omitempty"`
 }
 
 var blacklists = map[common.Address]bool{

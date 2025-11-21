@@ -218,6 +218,15 @@ func (c *Config) String() string {
 		)
 	}
 
+	if c.Viction != nil {
+		return fmt.Sprintf("{ChainID: %v, Saigon: %v, Atlas: %v, Engine: %v}",
+			c.ChainID,
+			c.SaigonBlock,
+			c.AtlasBlock,
+			engine,
+		)
+	}
+
 	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
@@ -240,6 +249,8 @@ func (c *Config) getEngine() string {
 		return c.Ethash.String()
 	case c.Clique != nil:
 		return c.Clique.String()
+	case c.Posv != nil:
+		return c.Posv.String()
 	case c.Bor != nil:
 		return c.Bor.String()
 	case c.Aura != nil:
@@ -294,6 +305,61 @@ func (c *Config) IsPetersburg(num uint64) bool {
 // IsIstanbul returns whether num is either equal to the Istanbul fork block or greater.
 func (c *Config) IsIstanbul(num uint64) bool {
 	return isForked(c.IstanbulBlock, num)
+}
+
+// IsTIP2019 returns whether num is either equal to the TIP2019 fork block or greater.
+func (c *Config) IsTIP2019(num uint64) bool {
+	return isForked(c.TIP2019Block, num)
+}
+
+// IsTIPSigning returns whether num is either equal to the TIPSigning fork block or greater.
+func (c *Config) IsTIPSigning(num uint64) bool {
+	return isForked(c.TIPSigningBlock, num)
+}
+
+// IsTIPRandomize returns whether num is either equal to the TIPRandomize fork block or greater.
+func (c *Config) IsTIPRandomize(num uint64) bool {
+	return isForked(c.TIPRandomizeBlock, num)
+}
+
+// IsTIPBlacklist returns whether num is either equal to the TIPBlacklist fork block or greater.
+func (c *Config) IsTIPBlacklist(num uint64) bool {
+	return isForked(c.TIPBlacklistBlock, num)
+}
+
+// IsTIPTRC21Fee returns whether num is either equal to the TIPTRC21Fee fork block or greater.
+func (c *Config) IsTIPTRC21Fee(num uint64) bool {
+	return isForked(c.TIPTRC21FeeBlock, num)
+}
+
+// IsTIPFixSignerCheck returns whether num is either equal to the TIPFixSignerCheck fork block or greater.
+func (c *Config) IsTIPFixSignerCheck(num uint64) bool {
+	return isForked(c.TIPFixSignerCheckBlock, num)
+}
+
+// IsTIPTomoX returns whether num is either equal to the TIPTomoX fork block or greater.
+func (c *Config) IsTIPTomoX(num uint64) bool {
+	return isForked(c.TIPTomoXBlock, num)
+}
+
+// IsTIPTomoXLending returns whether num is either equal to the TIPTomoXLending fork block or greater.
+func (c *Config) IsTIPTomoXLending(num uint64) bool {
+	return isForked(c.TIPTomoXLendingBlock, num)
+}
+
+// IsTIPTomoXCancelFee returns whether num is either equal to the TIPTomoXCancelFee fork block or greater.
+func (c *Config) IsTIPTomoXCancelFee(num uint64) bool {
+	return isForked(c.TIPTomoXCancelFeeBlock, num)
+}
+
+// IsSaigon returns whether num is either equal to the Saigon fork block or greater.
+func (c *Config) IsSaigon(num uint64) bool {
+	return isForked(c.SaigonBlock, num)
+}
+
+// IsAtlas returns whether num is either equal to the Atlas fork block or greater.
+func (c *Config) IsAtlas(num uint64) bool {
+	return isForked(c.AtlasBlock, num)
 }
 
 // IsBerlin returns whether num is either equal to the Berlin fork block or greater.
@@ -483,6 +549,16 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 		{name: "constantinopleBlock", blockNumber: c.ConstantinopleBlock},
 		{name: "petersburgBlock", blockNumber: c.PetersburgBlock},
 		{name: "istanbulBlock", blockNumber: c.IstanbulBlock},
+		{name: "tip2019Block", blockNumber: c.TIP2019Block},
+		{name: "tipSigningBlock", blockNumber: c.TIPSigningBlock},
+		{name: "tipRandomizeBlock", blockNumber: c.TIPRandomizeBlock},
+		{name: "tipBlacklistBlock", blockNumber: c.TIPBlacklistBlock},
+		{name: "tipTRC21FeeBlock", blockNumber: c.TIPTRC21FeeBlock},
+		{name: "tipTomoXBlock", blockNumber: c.TIPTomoXBlock},
+		{name: "tipTomoXLendingBlock", blockNumber: c.TIPTomoXLendingBlock},
+		{name: "tipTomoXCancelFeeBlock", blockNumber: c.TIPTomoXCancelFeeBlock},
+		{name: "saigonBlock", blockNumber: c.SaigonBlock},
+		{name: "atlasBlock", blockNumber: c.AtlasBlock},
 		{name: "muirGlacierBlock", blockNumber: c.MuirGlacierBlock, optional: true},
 		{name: "berlinBlock", blockNumber: c.BerlinBlock},
 		{name: "londonBlock", blockNumber: c.LondonBlock},
@@ -559,6 +635,36 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	}
 	if incompatible(c.IstanbulBlock, newcfg.IstanbulBlock, head) {
 		return newCompatError("Istanbul fork block", c.IstanbulBlock, newcfg.IstanbulBlock)
+	}
+	if incompatible(c.TIP2019Block, newcfg.TIP2019Block, head) {
+		return newCompatError("TIP2019 fork block", c.TIP2019Block, newcfg.TIP2019Block)
+	}
+	if incompatible(c.TIPSigningBlock, newcfg.TIPSigningBlock, head) {
+		return newCompatError("TIPSigning fork block", c.TIPSigningBlock, newcfg.TIPSigningBlock)
+	}
+	if incompatible(c.TIPRandomizeBlock, newcfg.TIPRandomizeBlock, head) {
+		return newCompatError("TIPRandomize fork block", c.TIPRandomizeBlock, newcfg.TIPRandomizeBlock)
+	}
+	if incompatible(c.TIPBlacklistBlock, newcfg.TIPBlacklistBlock, head) {
+		return newCompatError("TIPBlacklist fork block", c.TIPBlacklistBlock, newcfg.TIPBlacklistBlock)
+	}
+	if incompatible(c.TIPTRC21FeeBlock, newcfg.TIPTRC21FeeBlock, head) {
+		return newCompatError("TIPTRC21Fee fork block", c.TIPTRC21FeeBlock, newcfg.TIPTRC21FeeBlock)
+	}
+	if incompatible(c.TIPTomoXBlock, newcfg.TIPTomoXBlock, head) {
+		return newCompatError("TIPTomoX fork block", c.TIPTomoXBlock, newcfg.TIPTomoXBlock)
+	}
+	if incompatible(c.TIPTomoXLendingBlock, newcfg.TIPTomoXLendingBlock, head) {
+		return newCompatError("TIPTomoXLending fork block", c.TIPTomoXLendingBlock, newcfg.TIPTomoXLendingBlock)
+	}
+	if incompatible(c.TIPTomoXCancelFeeBlock, newcfg.TIPTomoXCancelFeeBlock, head) {
+		return newCompatError("TIPTomoXCancelFee fork block", c.TIPTomoXCancelFeeBlock, newcfg.TIPTomoXCancelFeeBlock)
+	}
+	if incompatible(c.SaigonBlock, newcfg.SaigonBlock, head) {
+		return newCompatError("Saigon fork block", c.SaigonBlock, newcfg.SaigonBlock)
+	}
+	if incompatible(c.AtlasBlock, newcfg.AtlasBlock, head) {
+		return newCompatError("Atlas fork block", c.AtlasBlock, newcfg.AtlasBlock)
 	}
 	if incompatible(c.MuirGlacierBlock, newcfg.MuirGlacierBlock, head) {
 		return newCompatError("Muir Glacier fork block", c.MuirGlacierBlock, newcfg.MuirGlacierBlock)
@@ -654,6 +760,11 @@ func (c *PosvConfig) String() string {
 	return "posv"
 }
 
+// Number of blocks producer in a year (365 days) based on configured period.
+func (c *PosvConfig) BlocksPerYear() uint64 {
+	return 31536000 / c.Period
+}
+
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
 // For example, config of {5: "A", 10: "B", 20: "C"}
@@ -686,6 +797,11 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+
+	IsTIP2019, IsTIPSigning, IsTIPRandomize            bool
+	IsTIPBlacklist, IsTIPTRC21Fee, IsTIPFixSignerCheck bool
+	IsTIPTomoX, IsTIPTomoXLending, IsTIPTomoXCancelFee bool
+	IsSaigon, IsAtlas                                  bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -713,6 +829,18 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
+
+		IsTIP2019:           c.IsTIP2019(num),
+		IsTIPSigning:        c.IsTIPSigning(num),
+		IsTIPRandomize:      c.IsTIPRandomize(num),
+		IsTIPBlacklist:      c.IsTIPBlacklist(num),
+		IsTIPTRC21Fee:       c.IsTIPTRC21Fee(num),
+		IsTIPFixSignerCheck: c.IsTIPFixSignerCheck(num),
+		IsTIPTomoX:          c.IsTIPTomoX(num),
+		IsTIPTomoXLending:   c.IsTIPTomoXLending(num),
+		IsTIPTomoXCancelFee: c.IsTIPTomoXCancelFee(num),
+		IsSaigon:            c.IsSaigon(num),
+		IsAtlas:             c.IsAtlas(num),
 	}
 }
 
