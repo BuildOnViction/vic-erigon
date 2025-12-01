@@ -1,0 +1,117 @@
+// Copyright 2025 The Viction Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package eth
+
+import (
+	"math/big"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/eth/viction"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/posv"
+
+	"github.com/tforce-io/tf-golib/stdx/mathxt/bigxt"
+)
+
+// Calculate and distribute reward at the end of each epoch.
+func (s *Ethereum) PosvEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
+	header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (*posv.EpochReward, error) {
+	epochRewards := &posv.EpochReward{}
+	blockNumber := header.Number.Uint64()
+	blockNumberBig := header.Number
+
+	if bigxt.IsLessThanOrEqualInt(blockNumberBig, new(big.Int).SetUint64(posvConfig.Epoch)) {
+		return epochRewards, nil
+	}
+
+	// Get initial reward
+	totalReward := viction.CalcDefaultRewardPerBlock((*big.Int)(vicConfig.RewardPerEpoch), blockNumber, posvConfig.BlocksPerYear())
+	// Get additional reward for Saigon upgrade
+	if chain.Config().IsSaigon(blockNumber) {
+		saigonReward := viction.CalcSaigonRewardPerBlock((*big.Int)(vicConfig.SaigonRewardPerEpoch), chain.Config().SaigonBlock, blockNumber, posvConfig.BlocksPerYear())
+		totalReward = new(big.Int).Add(totalReward, saigonReward)
+	}
+
+	// Calculate rewards for validators and stakeholders
+	validatorRewards, _ := viction.CalcRewardsForValidators(c, config, posvConfig, vicConfig, header, totalReward, chain, logger)
+	epochRewards.ValidatorRewards = validatorRewards
+
+	stakeholderRewards, _ := viction.CalcRewardsForStakeholders(c, config, posvConfig, vicConfig, header, validatorRewards, state, logger)
+	epochRewards.StakholderRewards = stakeholderRewards
+
+	return epochRewards, nil
+}
+
+// Penalize validators for creating bad block or not creating block at all.
+func (s *Ethereum) PosvPenalize() {}
+
+// Get eligble validators from the state.
+func (s *Ethereum) PosvGetValidators() {}
+
+// Get attestors from list of validators.
+func (s *Ethereum) PosvGetAttestors() {}
+
+// Get block signers from the state.
+func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
+	chain consensus.ChainReader,
+) []types.Transaction {
+	blockNumber := header.Number.Uint64()
+	block := chain.GetBlock(header.Hash(), blockNumber)
+	data := []types.Transaction{}
+	transactions := block.Transactions()
+	if config.IsTIPSigning(blockNumber) {
+		for _, tx := range transactions {
+			if IsVicBlockSingingTx(tx, vicConfig) {
+				data = append(data, tx)
+			}
+		}
+	} else {
+		// TODO: Handle receipts later
+		for _, tx := range transactions {
+			if IsVicBlockSingingTx(tx, vicConfig) {
+				data = append(data, tx)
+			}
+		}
+	}
+	return data
+}
+
+// Verify list of new validators for next epoch.
+func (s *Ethereum) PosvVerifyNewValidators() {}
+
+func IsVicBlockSingingTx(tx types.Transaction, vicConfig *chain.VictionConfig) bool {
+	toAddr := tx.GetTo()
+	if toAddr == nil || *toAddr != vicConfig.ValidatorBlockSignContract {
+		return false
+	}
+
+	data := tx.GetData()
+	method := common.Bytes2Hex(data[0:4])
+
+	if method != state.SignMethodHex && len(data) >= 68 {
+		return false
+	}
+
+	return true
+}

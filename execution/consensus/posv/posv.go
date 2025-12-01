@@ -2,6 +2,8 @@
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)
+// Copyright 2025 The Viction Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -55,9 +57,11 @@ import (
 )
 
 const (
+	addressLength          = uint64(20)             // Length of an address
 	epochLength            = uint64(900)            // Default number of blocks after which to checkpoint and reset the pending votes
 	ExtraVanity            = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSeal              = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+	recentBlockSignCache   = 4096                   // Number of recent blocks to cache sign data
 	recentBlockVerifyCache = 256                    // Number of recent blocks to cache verfication results
 	warmupCacheSnapshots   = 20
 
@@ -182,10 +186,11 @@ type Posv struct {
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
-	signatures       *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
-	attestSignatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
-	recents          *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
-	verifiedBlocks   *lru.ARCCache[common.Hash, bool]           // Status of recent blocks to speed up synching
+	signatures       *lru.ARCCache[common.Hash, common.Address]      // Signatures of recent blocks to speed up mining
+	attestSignatures *lru.ARCCache[common.Hash, common.Address]      // Signatures of recent blocks to speed up mining
+	recents          *lru.ARCCache[common.Hash, *Snapshot]           // Snapshots for recent blocks to speed up reorgs
+	verifiedBlocks   *lru.ARCCache[common.Hash, bool]                // Status of recent blocks to speed up syncing
+	blockSigners     *lru.ARCCache[common.Hash, []types.Transaction] // All transactions signed for particular block of recent blocks cache
 
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
@@ -200,19 +205,6 @@ type Posv struct {
 	logger log.Logger
 
 	backend PosvBackend
-}
-
-type PosvBackend interface {
-	// Calculate and distribute reward at the end of each epoch.
-	PosvEpochReward()
-	// Penalize validators for creating bad block or not creating block at all.
-	PosvPenalize()
-	// Get eligble validators from the state.
-	PosvGetValidators()
-	// Get attestors from list of validators.
-	PosvGetAttestors()
-	// Verify list of new validators for next epoch.
-	PosvVerifyNewValidators()
 }
 
 // New creates a PoSV proof-of-stake consensus engine with the initial
@@ -230,6 +222,7 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posv
 	signatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
 	attestSignatures, _ := lru.NewARC[common.Hash, common.Address](snapshotConfig.InmemorySignatures)
 	verifiedBlocks, _ := lru.NewARC[common.Hash, bool](recentBlockVerifyCache)
+	blockSigners, _ := lru.NewARC[common.Hash, []types.Transaction](recentBlockSignCache)
 
 	exitCh := make(chan struct{})
 
@@ -243,6 +236,7 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, posv
 		signatures:       signatures,
 		attestSignatures: attestSignatures,
 		verifiedBlocks:   verifiedBlocks,
+		blockSigners:     blockSigners,
 
 		proposals: make(map[common.Address]bool),
 		exitCh:    exitCh,

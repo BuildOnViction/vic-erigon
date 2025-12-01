@@ -2,6 +2,8 @@
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)
+// Copyright 2025 The Viction Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -153,6 +155,7 @@ type Ethereum struct {
 	// DB interfaces
 	chainDB    kv.TemporalRwDB
 	privateAPI *grpc.Server
+	ethAPI     jsonrpc.EthAPI
 
 	engine consensus.Engine
 
@@ -1083,6 +1086,33 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			ctxCancel()
 		}()
+	}
+
+	if chainConfig.Posv != nil {
+		baseApi := jsonrpc.NewBaseApi(
+			backend.rpcFilters,
+			backend.rpcDaemonStateCache,
+			blockReader,
+			httpRpcCfg.WithDatadir,
+			httpRpcCfg.EvmCallTimeout,
+			backend.engine,
+			httpRpcCfg.Dirs,
+			backend.polygonBridge,
+		)
+		backend.ethAPI = jsonrpc.NewEthAPI(
+			baseApi,
+			backend.chainDB,
+			backend.ethRpcClient,
+			backend.txPoolRpcClient,
+			backend.miningRpcClient,
+			httpRpcCfg.Gascap,
+			httpRpcCfg.Feecap,
+			httpRpcCfg.ReturnDataLimit,
+			httpRpcCfg.AllowUnprotectedTxs,
+			httpRpcCfg.MaxGetProofRewindBlockCount,
+			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+			logger,
+		)
 	}
 
 	if chainConfig.Bor != nil && config.PolygonSync {
