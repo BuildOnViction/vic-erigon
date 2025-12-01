@@ -31,9 +31,10 @@ type VictionConfig struct {
 	PenaltyComebackBlockCount uint64 `json:"penaltyComebackBlockCount,omitempty"`
 	PenaltyEpochCount         uint64 `json:"penaltyEpochCount,omitempty"`
 
-	RandomizerCommitNthBlock uint64 `json:"randomizerCommitNthBlock,omitempty"`
-	RandomizerFinaleNthBlock uint64 `json:"randomizerFinaleNthBlock,omitempty"`
-	RandomizerRevealNthBlock uint64 `json:"randomizerRevealNthBlock,omitempty"`
+	RandomizerCommitNthBlock uint64         `json:"randomizerCommitNthBlock,omitempty"`
+	RandomizerContract       common.Address `json:"randomizerContract,omitempty"`
+	RandomizerFinaleNthBlock uint64         `json:"randomizerFinaleNthBlock,omitempty"`
+	RandomizerRevealNthBlock uint64         `json:"randomizerRevealNthBlock,omitempty"`
 
 	RewardFoundationAddress common.Address   `json:"rewardFoundationAddress,omitempty"`
 	RewardFoundationPercent uint64           `json:"rewardFoundationPercent,omitempty"`

@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -31,7 +32,7 @@ import (
 	"github.com/tforce-io/tf-golib/stdx/mathxt/bigxt"
 )
 
-// Calculate and distribute reward at the end of each epoch.
+// Calculate and distribute reward at checkpoint block.
 func (s *Ethereum) PosvEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 	header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
@@ -69,8 +70,11 @@ func (s *Ethereum) PosvPenalize() {}
 // Get eligble validators from the state.
 func (s *Ethereum) PosvGetValidators() {}
 
-// Get attestors from list of validators.
-func (s *Ethereum) PosvGetAttestors() {}
+// Get attestors from list of validators at checkpoint block.
+func (s *Ethereum) PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
+) ([]int64, error) {
+	return viction.GetAttestors(vicConfig, validators, s.contractBackend)
+}
 
 // Get block signers from the state.
 func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
@@ -100,6 +104,14 @@ func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.V
 // Verify list of new validators for next epoch.
 func (s *Ethereum) PosvVerifyNewValidators() {}
 
+// Return a state.IntraBlockState instance to access low level contract storage.
+func (s *Ethereum) GetStateReader() *state.IntraBlockState {
+	tx, _ := s.chainDB.BeginTemporalRo(context.TODO())
+	reader := state.NewReaderV3(tx)
+	return state.New(reader)
+}
+
+// Check a transaction is Viction BlockSign transaction.
 func IsVicBlockSingingTx(tx types.Transaction, vicConfig *chain.VictionConfig) bool {
 	toAddr := tx.GetTo()
 	if toAddr == nil || *toAddr != vicConfig.ValidatorBlockSignContract {

@@ -21,6 +21,7 @@
     "penaltyComebackBlockCount": 150,
     "penaltyEpochCount": 4,
     "randomizerCommitNthBlock": 800,
+    "randomizerContract": "0x0000000000000000000000000000000000000090",
     "randomizerFinaleNthBlock": 900,
     "randomizerRevealNthBlock": 850,
     "rewardFoundationAddress": "0x0000000000000000000000000000000000000068",

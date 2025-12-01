@@ -106,6 +106,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/clique"
@@ -173,6 +174,7 @@ type Ethereum struct {
 	eth1ExecutionServer *eth1.EthereumExecutionModule
 
 	ethBackendRPC       *privateapi2.EthBackendServer
+	contractBackend     bind.ContractBackend
 	ethRpcClient        rpchelper.ApiBackend
 	engineBackendRPC    *engineapi.EngineServer
 	miningRPC           *privateapi2.MiningServer
@@ -1088,7 +1090,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
-	if chainConfig.Posv != nil {
+	if backend.engine.Type() == chain.PosvConsensus {
 		baseApi := jsonrpc.NewBaseApi(
 			backend.rpcFilters,
 			backend.rpcDaemonStateCache,
@@ -1113,6 +1115,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
 			logger,
 		)
+		backend.contractBackend = contracts.NewDirectBackend(backend.ethAPI)
 	}
 
 	if chainConfig.Bor != nil && config.PolygonSync {

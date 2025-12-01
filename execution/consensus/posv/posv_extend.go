@@ -17,7 +17,10 @@
 package posv
 
 import (
+	"bytes"
+	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -56,7 +59,8 @@ type PosvBackend interface {
 	PosvGetValidators()
 
 	// Get attestors from list of validators.
-	PosvGetAttestors()
+	PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
+	) ([]int64, error)
 
 	// Get block signers from the state.
 	PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
@@ -91,4 +95,30 @@ func ExtractValidatorsFromCheckpointHeader(header *types.Header) []common.Addres
 	}
 
 	return validators
+}
+
+// Encode list of attestor numbers into bytes following format of Block.Attestors.
+func EncodeAttestorsForHeader(attestors []uint64) []byte {
+	var attestorsBuff []byte
+	for _, attestor := range attestors {
+		m2Byte := common.LeftPadBytes([]byte(fmt.Sprintf("%d", attestor)), attestorHeaderItemLength)
+		attestorsBuff = append(attestorsBuff, m2Byte...)
+	}
+	return attestorsBuff
+}
+
+// Decode bytes with format of Block.Attestors into list of attestor numbers.
+func DecodeAttestorsFromHeader(attestorsBuff []byte) []uint64 {
+	var attestors []uint64
+	attestorCount := len(attestorsBuff) / attestorHeaderItemLength
+	for i := 0; i < attestorCount; i++ {
+		attestorBuff := bytes.Trim(attestorsBuff[i*attestorHeaderItemLength:(i+1)*attestorHeaderItemLength], "\x00")
+		attestorNumber, err := strconv.ParseUint(string(attestorBuff), 10, 64)
+		if err != nil {
+			return []uint64{}
+		}
+		attestors = append(attestors, attestorNumber)
+	}
+
+	return attestors
 }
