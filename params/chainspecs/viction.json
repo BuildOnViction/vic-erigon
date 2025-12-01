@@ -29,6 +29,8 @@
     "rewardValidatorPercent": 40,
     "rewardVoterPercent": 50,
     "trc21GasPrice": "2500",
+    "validatorBlockSignContract": "0x0000000000000000000000000000000000000089",
+    "validatorContract": "0x0000000000000000000000000000000000000088",
     "validatorMinPerEpochCount": 1,
     "validatorMaxCount": 150,
     "validatorSignInterval": 15,
