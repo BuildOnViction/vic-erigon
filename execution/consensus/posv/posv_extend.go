@@ -54,8 +54,17 @@ type ValidatorReward struct {
 }
 
 type PosvBackend interface {
+	// Get attestors from list of validators.
+	PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
+	) ([]int64, error)
+
+	// Get block signers from the state.
+	PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
+		chain consensus.ChainReader,
+	) []types.Transaction
+
 	// Calculate and distribute reward at the end of each epoch.
-	PosvEpochReward(c *Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
+	PosvGetEpochReward(c *Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 		header *types.Header,
 		chain consensus.ChainReader, state *state.IntraBlockState, logger log.Logger,
 	) (*EpochReward, error)
@@ -69,18 +78,6 @@ type PosvBackend interface {
 	// Get eligble validators from the state.
 	PosvGetValidators(vicConfig *chain.VictionConfig, header *types.Header, chain consensus.ChainReader,
 	) ([]common.Address, error)
-
-	// Get attestors from list of validators.
-	PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
-	) ([]int64, error)
-
-	// Get block signers from the state.
-	PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
-		chain consensus.ChainReader,
-	) []types.Transaction
-
-	// Verify list of new attestors for next epoch.
-	PosvVerifyNewValidators()
 }
 
 // Get all BlockSign transactions for a given block. If it's not cached yet, get it from the state.

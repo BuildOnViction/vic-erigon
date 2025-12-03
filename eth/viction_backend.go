@@ -35,8 +35,39 @@ import (
 	"github.com/tforce-io/tf-golib/stdx/mathxt/bigxt"
 )
 
+// Get attestors from list of validators at checkpoint block.
+func (s *Ethereum) PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
+) ([]int64, error) {
+	return viction.GetAttestors(vicConfig, validators, s.contractBackend)
+}
+
+// Get block signers from the state.
+func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
+	chain consensus.ChainReader,
+) []types.Transaction {
+	blockNumber := header.Number.Uint64()
+	block := chain.GetBlock(header.Hash(), blockNumber)
+	data := []types.Transaction{}
+	transactions := block.Transactions()
+	if config.IsTIPSigning(blockNumber) {
+		for _, tx := range transactions {
+			if IsVicBlockSingingTx(tx, vicConfig) {
+				data = append(data, tx)
+			}
+		}
+	} else {
+		// TODO: Handle receipts later
+		for _, tx := range transactions {
+			if IsVicBlockSingingTx(tx, vicConfig) {
+				data = append(data, tx)
+			}
+		}
+	}
+	return data
+}
+
 // Calculate and distribute reward at checkpoint block.
-func (s *Ethereum) PosvEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
+func (s *Ethereum) PosvGetEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 	header *types.Header,
 	chain consensus.ChainReader, state *state.IntraBlockState, logger log.Logger,
 ) (*posv.EpochReward, error) {
@@ -81,44 +112,11 @@ func (s *Ethereum) PosvGetPenalties(c *posv.Posv, config *chain.Config, posvConf
 func (s *Ethereum) PosvGetValidators(vicConfig *chain.VictionConfig, header *types.Header, chain consensus.ChainReader,
 ) ([]common.Address, error) {
 	tx, _ := s.chainDB.BeginTemporalRo(context.TODO())
+	defer tx.Rollback()
 	block := chain.GetBlock(header.Hash(), header.Number.Uint64())
 	state := s.GetHistoricalStateReader(tx, block)
 	return viction.GetValidators(vicConfig, state, s.contractBackend)
 }
-
-// Get attestors from list of validators at checkpoint block.
-func (s *Ethereum) PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
-) ([]int64, error) {
-	return viction.GetAttestors(vicConfig, validators, s.contractBackend)
-}
-
-// Get block signers from the state.
-func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.VictionConfig, header *types.Header,
-	chain consensus.ChainReader,
-) []types.Transaction {
-	blockNumber := header.Number.Uint64()
-	block := chain.GetBlock(header.Hash(), blockNumber)
-	data := []types.Transaction{}
-	transactions := block.Transactions()
-	if config.IsTIPSigning(blockNumber) {
-		for _, tx := range transactions {
-			if IsVicBlockSingingTx(tx, vicConfig) {
-				data = append(data, tx)
-			}
-		}
-	} else {
-		// TODO: Handle receipts later
-		for _, tx := range transactions {
-			if IsVicBlockSingingTx(tx, vicConfig) {
-				data = append(data, tx)
-			}
-		}
-	}
-	return data
-}
-
-// Verify list of new validators for next epoch.
-func (s *Ethereum) PosvVerifyNewValidators() {}
 
 // Return a state.IntraBlockState instance to access low level contract storage.
 func (s *Ethereum) GetStateReader(tx kv.TemporalTx) *state.IntraBlockState {
