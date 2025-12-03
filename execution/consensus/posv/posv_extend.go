@@ -34,9 +34,18 @@ const (
 	attestorHeaderItemLength = 4
 )
 
+// EpochReward stores number of sign made by each validator and rewards for
+// all stakeholders (validators and voters) in an epoch.
 type EpochReward struct {
 	ValidatorRewards  map[common.Address]*ValidatorReward `json:"signers"`
 	StakholderRewards map[common.Address]*big.Int         `json:"rewards"`
+}
+
+// ValidatorInfo stores basic information about a validator.
+type ValidatorInfo struct {
+	Address  common.Address `json:"address"`
+	Capacity *big.Int       `json:"capacity"`
+	Owner    common.Address `json:"owner"`
 }
 
 type ValidatorReward struct {
@@ -52,10 +61,14 @@ type PosvBackend interface {
 	) (*EpochReward, error)
 
 	// Penalize validators for creating bad block or not creating block at all.
-	PosvPenalize()
+	PosvGetPenalties(c *Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
+		header *types.Header,
+		chain consensus.ChainReader,
+	) ([]common.Address, error)
 
 	// Get eligble validators from the state.
-	PosvGetValidators()
+	PosvGetValidators(vicConfig *chain.VictionConfig, header *types.Header, chain consensus.ChainReader,
+	) ([]common.Address, error)
 
 	// Get attestors from list of validators.
 	PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
@@ -66,7 +79,7 @@ type PosvBackend interface {
 		chain consensus.ChainReader,
 	) []types.Transaction
 
-	// Verify list of new validators for next epoch.
+	// Verify list of new attestors for next epoch.
 	PosvVerifyNewValidators()
 }
 

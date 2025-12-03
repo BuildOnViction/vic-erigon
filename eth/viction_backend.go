@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -65,11 +66,25 @@ func (s *Ethereum) PosvEpochReward(c *posv.Posv, config *chain.Config, posvConfi
 	return epochRewards, nil
 }
 
-// Penalize validators for creating bad block or not creating block at all.
-func (s *Ethereum) PosvPenalize() {}
+// Get list of validators creating bad block or not creating block at all.
+func (s *Ethereum) PosvGetPenalties(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
+	header *types.Header,
+	chain consensus.ChainReader,
+) ([]common.Address, error) {
+	if config.IsTIPSigning(header.Number.Uint64()) {
+		return viction.PenalizeValidatorsTIPSigning(c, config, posvConfig, vicConfig, header, chain)
+	}
+	return viction.PenalizeValidatorsDefault(c, config, posvConfig, vicConfig, header, chain)
+}
 
 // Get eligble validators from the state.
-func (s *Ethereum) PosvGetValidators() {}
+func (s *Ethereum) PosvGetValidators(vicConfig *chain.VictionConfig, header *types.Header, chain consensus.ChainReader,
+) ([]common.Address, error) {
+	tx, _ := s.chainDB.BeginTemporalRo(context.TODO())
+	block := chain.GetBlock(header.Hash(), header.Number.Uint64())
+	state := s.GetHistoricalStateReader(tx, block)
+	return viction.GetValidators(vicConfig, state, s.contractBackend)
+}
 
 // Get attestors from list of validators at checkpoint block.
 func (s *Ethereum) PosvGetAttestors(vicConfig *chain.VictionConfig, header *types.Header, validators []common.Address,
