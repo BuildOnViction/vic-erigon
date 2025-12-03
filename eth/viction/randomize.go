@@ -72,17 +72,17 @@ func GetAttestorsFromRandomize(randomizes []int64, signersLen int64) ([]int64, e
 }
 
 func GetRandomizeOfValidator(vicConfig *chain.VictionConfig, validator common.Address, client bind.ContractBackend) (int64, error) {
-	randomize, err := contracts.NewVictionRandomize(vicConfig.RandomizerContract, client)
+	randomizeContract, err := contracts.NewVictionRandomize(vicConfig.RandomizerContract, client)
 	if err != nil {
 		return -1, err
 	}
 
 	opts := new(bind.CallOpts)
-	secrets, err := randomize.GetSecret(opts, validator)
+	secrets, err := randomizeContract.GetSecret(opts, validator)
 	if err != nil {
 		return -1, err
 	}
-	opening, err := randomize.GetOpening(opts, validator)
+	opening, err := randomizeContract.GetOpening(opts, validator)
 	if err != nil {
 		return -1, err
 	}

@@ -57,7 +57,7 @@ import (
 )
 
 const (
-	addressLength          = uint64(20)             // Length of an address
+	AddressLength          = uint64(20)             // Length of an address
 	epochLength            = uint64(900)            // Default number of blocks after which to checkpoint and reset the pending votes
 	ExtraVanity            = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSeal              = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal

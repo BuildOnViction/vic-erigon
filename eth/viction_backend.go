@@ -17,26 +17,27 @@
 package eth
 
 import (
-	"context"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/viction"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/posv"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 
 	"github.com/tforce-io/tf-golib/stdx/mathxt/bigxt"
 )
 
 // Calculate and distribute reward at checkpoint block.
 func (s *Ethereum) PosvEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
-	header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
+	header *types.Header,
+	chain consensus.ChainReader, state *state.IntraBlockState, logger log.Logger,
 ) (*posv.EpochReward, error) {
 	epochRewards := &posv.EpochReward{}
 	blockNumber := header.Number.Uint64()
@@ -105,9 +106,14 @@ func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.V
 func (s *Ethereum) PosvVerifyNewValidators() {}
 
 // Return a state.IntraBlockState instance to access low level contract storage.
-func (s *Ethereum) GetStateReader() *state.IntraBlockState {
-	tx, _ := s.chainDB.BeginTemporalRo(context.TODO())
+func (s *Ethereum) GetStateReader(tx kv.TemporalTx) *state.IntraBlockState {
 	reader := state.NewReaderV3(tx)
+	return state.New(reader)
+}
+
+// Return a state.IntraBlockState instance to access low level contract storage.
+func (s *Ethereum) GetHistoricalStateReader(tx kv.TemporalTx, block *types.Block) *state.IntraBlockState {
+	reader, _ := rpchelper.CreateHistoryStateReader(tx, block.NumberU64(), 0, rawdbv3.TxNums)
 	return state.New(reader)
 }
 

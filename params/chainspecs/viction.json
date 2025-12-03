@@ -32,7 +32,7 @@
     "trc21GasPrice": "2500",
     "validatorBlockSignContract": "0x0000000000000000000000000000000000000089",
     "validatorContract": "0x0000000000000000000000000000000000000088",
-    "validatorMinPerEpochCount": 1,
+    "validatorMinBlockPerEpochCount": 1,
     "validatorMaxCount": 150,
     "validatorSignInterval": 15,
     "vrc25Contract": "0x8c0faeb5C6bEd2129b8674F262Fd45c4e9468bee",

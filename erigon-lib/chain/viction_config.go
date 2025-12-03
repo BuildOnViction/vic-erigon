@@ -65,11 +65,11 @@ type VictionConfig struct {
 	TomoXTopupDenom    uint64           `json:"tomoxTopupDenom,omitempty"`
 	TomoXTopupNumer    uint64           `json:"tomoxTopupNumer,omitempty"`
 
-	ValidatorBlockSignContract common.Address `json:"validatorBlockSignContract,omitempty"`
-	ValidatorContract          common.Address `json:"validatorContract,omitempty"`
-	ValidatorMinPerEpochCount  uint64         `json:"validatorMinPerEpochCount,omitempty"`
-	ValidatorMaxCount          uint64         `json:"validatorMaxCount,omitempty"`
-	ValidatorSignInterval      uint64         `json:"validatorSignInterval,omitempty"`
+	ValidatorBlockSignContract     common.Address `json:"validatorBlockSignContract,omitempty"`
+	ValidatorContract              common.Address `json:"validatorContract,omitempty"`
+	ValidatorMinBlockPerEpochCount uint64         `json:"validatorMinBlockPerEpochCount,omitempty"`
+	ValidatorMaxCount              uint64         `json:"validatorMaxCount,omitempty"`
+	ValidatorSignInterval          uint64         `json:"validatorSignInterval,omitempty"`
 
 	VRC25GasPrice *math.Decimal256 `json:"vrc25GasPrice,omitempty"`
 	VRC25Contract common.Address   `json:"vrc25Contract,omitempty"`

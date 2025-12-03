@@ -47,9 +47,8 @@ type ValidatorReward struct {
 type PosvBackend interface {
 	// Calculate and distribute reward at the end of each epoch.
 	PosvEpochReward(c *Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
-		header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-		chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
+		header *types.Header,
+		chain consensus.ChainReader, state *state.IntraBlockState, logger log.Logger,
 	) (*EpochReward, error)
 
 	// Penalize validators for creating bad block or not creating block at all.
@@ -83,15 +82,20 @@ func (c *Posv) GetSignDataForBlock(config *chain.Config, vicConfig *chain.Victio
 	return signers
 }
 
+// Recover the signer address from a block header
+func (c *Posv) Ecrecover(header *types.Header) (common.Address, error) {
+	return ecrecover(header, c.signatures)
+}
+
 // Process block header Extra field of a checkpoint block to return the list of new validators.
 func ExtractValidatorsFromCheckpointHeader(header *types.Header) []common.Address {
 	if header == nil {
 		return []common.Address{}
 	}
 
-	validators := make([]common.Address, (len(header.Extra)-ExtraVanity-ExtraSeal)/int(addressLength))
+	validators := make([]common.Address, (len(header.Extra)-ExtraVanity-ExtraSeal)/int(AddressLength))
 	for i := 0; i < len(validators); i++ {
-		copy(validators[i][:], header.Extra[ExtraVanity+i*int(addressLength):])
+		copy(validators[i][:], header.Extra[ExtraVanity+i*int(AddressLength):])
 	}
 
 	return validators
