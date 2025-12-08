@@ -92,6 +92,34 @@ func (c *Posv) GetSignDataForBlock(config *chain.Config, vicConfig *chain.Victio
 	return signers
 }
 
+// Decode bytes with format of Block.Attestors into list of attestor numbers.
+func DecodeAttestorsFromHeader(attestorsBuff []byte) []int64 {
+	attestorCount := len(attestorsBuff) / attestorHeaderItemLength
+	attestors := make([]int64, attestorCount)
+	for i := 0; i < attestorCount; i++ {
+		attestorBuff := bytes.Trim(attestorsBuff[i*attestorHeaderItemLength:(i+1)*attestorHeaderItemLength], "\x00")
+		attestorNumber, err := strconv.ParseInt(string(attestorBuff), 10, 64)
+		if err != nil {
+			return []int64{}
+		}
+		attestors[i] = attestorNumber
+	}
+
+	return attestors
+}
+
+// Decode bytes with format of Block.Penalties into list of addresses.
+func DecodePenaltiesFromHeader(penaltiesBuff []byte) []common.Address {
+	addressLengthInt := int(AddressLength)
+	penaltyCount := len(penaltiesBuff) / addressLengthInt
+	penalties := make([]common.Address, penaltyCount)
+	for i := 0; i < penaltyCount; i++ {
+		penaltyBuff := penaltiesBuff[i*addressLengthInt : (i+1)*addressLengthInt]
+		penalties[i] = common.BytesToAddress(penaltyBuff)
+	}
+	return penalties
+}
+
 // Recover the signer address from a block header
 func (c *Posv) Ecrecover(header *types.Header) (common.Address, error) {
 	return ecrecover(header, c.signatures)
@@ -112,27 +140,32 @@ func ExtractValidatorsFromCheckpointHeader(header *types.Header) []common.Addres
 }
 
 // Encode list of attestor numbers into bytes following format of Block.Attestors.
-func EncodeAttestorsForHeader(attestors []uint64) []byte {
+func EncodeAttestorsForHeader(attestors []int64) []byte {
 	var attestorsBuff []byte
 	for _, attestor := range attestors {
-		m2Byte := common.LeftPadBytes([]byte(fmt.Sprintf("%d", attestor)), attestorHeaderItemLength)
-		attestorsBuff = append(attestorsBuff, m2Byte...)
+		attestorBuff := common.LeftPadBytes([]byte(fmt.Sprintf("%d", attestor)), attestorHeaderItemLength)
+		attestorsBuff = append(attestorsBuff, attestorBuff...)
 	}
 	return attestorsBuff
 }
 
-// Decode bytes with format of Block.Attestors into list of attestor numbers.
-func DecodeAttestorsFromHeader(attestorsBuff []byte) []uint64 {
-	var attestors []uint64
-	attestorCount := len(attestorsBuff) / attestorHeaderItemLength
-	for i := 0; i < attestorCount; i++ {
-		attestorBuff := bytes.Trim(attestorsBuff[i*attestorHeaderItemLength:(i+1)*attestorHeaderItemLength], "\x00")
-		attestorNumber, err := strconv.ParseUint(string(attestorBuff), 10, 64)
-		if err != nil {
-			return []uint64{}
-		}
-		attestors = append(attestors, attestorNumber)
+// Encode list of penalized addresses into bytes following format of Block.Penalties.
+func EncodePenaltiesForHeader(penalties []common.Address) []byte {
+	var penaltiesBuff []byte
+	for _, attestor := range penalties {
+		penaltiesBuff = append(penaltiesBuff, attestor.Bytes()...)
 	}
+	return penaltiesBuff
+}
 
-	return attestors
+// Get list of validators from checkpoint block header. If the given block is not a checkpoint block,
+// then get list of validators from previous checkpoint block header.
+func GetNearestCheckpointValidators(posvConfig *chain.PosvConfig, header *types.Header, chain consensus.ChainReader) []common.Address {
+	blockNumber := header.Number.Uint64()
+	if blockNumber%posvConfig.Epoch == 0 {
+		return ExtractValidatorsFromCheckpointHeader(header)
+	}
+	prevCheckpointBlockNumber := blockNumber - (blockNumber % posvConfig.Epoch)
+	prevCheckpointHeader := chain.GetHeaderByNumber(prevCheckpointBlockNumber)
+	return ExtractValidatorsFromCheckpointHeader(prevCheckpointHeader)
 }

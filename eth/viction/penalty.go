@@ -24,18 +24,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/posv"
 )
 
-func ExtractAddressesFromPenalties(penaltiesBuff []byte) []common.Address {
-	addressLengthInt := int(posv.AddressLength)
-	if penaltiesBuff != nil && len(penaltiesBuff) < addressLengthInt {
-		return []common.Address{}
-	}
-	penalties := make([]common.Address, len(penaltiesBuff)/addressLengthInt)
-	for i := 0; i < len(penalties); i++ {
-		copy(penalties[i][:], penaltiesBuff[i*addressLengthInt:])
-	}
-	return penalties
-}
-
 func PenalizeValidatorsTIPSigning(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 	header *types.Header,
 	chain consensus.ChainReader,
@@ -88,7 +76,7 @@ func PenalizeValidatorsTIPSigning(c *posv.Posv, config *chain.Config, posvConfig
 	comebacks := []common.Address{}
 	if comebackCheckpointBlockNumber > 0 {
 		combackHeader := chain.GetHeaderByNumber(comebackCheckpointBlockNumber)
-		penalties := ExtractAddressesFromPenalties(combackHeader.Penalties)
+		penalties := posv.DecodePenaltiesFromHeader(combackHeader.Penalties)
 		for _, p := range penalties {
 			for _, addr := range validators {
 				if p == addr {
