@@ -318,7 +318,8 @@ func (c *Posv) VerifySeal(chain consensus.ChainHeaderReader, header *types.Heade
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Posv) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (c *Posv) Prepare(chainH consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+	chain := chainH.(consensus.ChainReader)
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -364,9 +365,35 @@ func (c *Posv) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	header.Extra = header.Extra[:ExtraVanity]
 
 	if number%c.config.Epoch == 0 {
-		for _, signer := range snap.GetSigners() {
-			header.Extra = append(header.Extra, signer[:]...)
+		validators := snap.GetSigners()
+		// remove penalized validators in current epoch
+		penalties, err := c.backend.PosvGetPenalties(c, c.ChainConfig, c.ChainConfig.Posv, c.ChainConfig.Viction, header, chain)
+		if err != nil {
+			return err
 		}
+		if len(penalties) > 0 {
+			validators = common.SetSubstract(validators, penalties)
+			header.Penalties = EncodePenaltiesForHeader(penalties)
+		}
+		// remove penalized validators in recent epochs
+		for i := uint64(1); i <= c.ChainConfig.Viction.PenaltyEpochCount; i++ {
+			prevCheckpointBlockNumber := number - (i * c.config.Epoch)
+			prevCehckpointHeader := chain.GetHeaderByNumber(prevCheckpointBlockNumber)
+			penalties := DecodePenaltiesFromHeader(prevCehckpointHeader.Penalties)
+			if len(penalties) > 0 {
+				validators = common.SetSubstract(validators, penalties)
+			}
+		}
+		// Write the final list of validators to Extra field
+		for _, validator := range validators {
+			header.Extra = append(header.Extra, validator[:]...)
+		}
+		// Write list of attestors to NewAttestors field
+		attestors, err := c.backend.PosvGetAttestors(c.ChainConfig.Viction, header, validators)
+		if err != nil {
+			return err
+		}
+		header.NewAttestors = EncodeAttestorsForHeader(attestors)
 	}
 	header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)
 
