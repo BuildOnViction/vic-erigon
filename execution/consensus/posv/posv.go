@@ -533,23 +533,9 @@ func (c *Posv) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Posv) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
-
-	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
-	if err != nil {
-		return nil
-	}
-	c.lock.RLock()
-	signer := c.signer
-	c.lock.RUnlock()
-	return calcDifficulty(snap, signer)
-}
-
-func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
-	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(DiffInTurn)
-	}
-	return new(big.Int).Set(diffNoTurn)
+func (c *Posv) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
+	parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
+	return c.calcDifficulty(c.signer, parentNumber, parentHash, chain)
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
