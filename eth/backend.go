@@ -375,7 +375,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		genesisSpec := config.Genesis
 		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
+			// For custom network ID 1337, always use custom genesis
+			if config.NetworkID == 1337 {
+				genesisSpec = config.Genesis
+			} else {
+				genesisSpec = nil
+			}
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)

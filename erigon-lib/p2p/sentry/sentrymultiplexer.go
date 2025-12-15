@@ -111,13 +111,12 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 		client := client
 
 		client.RLock()
-		protocol := client.protocol
+		clientProtocol := client.protocol
 		client.RUnlock()
 
-		if protocol < 0 {
+		if clientProtocol < 0 {
 			g.Go(func() error {
 				reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-
 				if err != nil {
 					return err
 				}
@@ -130,11 +129,17 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 				}
 
 				client.Lock()
-				client.protocol = protocol
+				client.protocol = reply.Protocol
 				client.Unlock()
 
 				return nil
 			})
+		} else {
+			mu.Lock()
+			if clientProtocol > protocol {
+				protocol = clientProtocol
+			}
+			mu.Unlock()
 		}
 	}
 

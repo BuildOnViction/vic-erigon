@@ -33,6 +33,9 @@ import (
 )
 
 var ProtocolToString = map[uint]string{
+	//[to-do] direct protocol version eth/63
+	direct.ETH63: "eth63",
+
 	direct.ETH67: "eth67",
 	direct.ETH68: "eth68",
 }
@@ -46,6 +49,8 @@ const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
 const (
+	//[to-do] Protocol messages in eth/63 (legacy - dont have request IDs)
+
 	// Protocol messages in eth/64
 	StatusMsg          = 0x00
 	NewBlockHashesMsg  = 0x01
@@ -93,9 +98,34 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
+	direct.ETH63: {
+		StatusMsg:          proto_sentry.MessageId_STATUS_63,
+		NewBlockHashesMsg:  proto_sentry.MessageId_NEW_BLOCK_HASHES_63,
+		TransactionsMsg:    proto_sentry.MessageId_TRANSACTIONS_63,
+		GetBlockHeadersMsg: proto_sentry.MessageId_GET_BLOCK_HEADERS_63,
+		BlockHeadersMsg:    proto_sentry.MessageId_BLOCK_HEADERS_63,
+		GetBlockBodiesMsg:  proto_sentry.MessageId_GET_BLOCK_BODIES_63,
+		BlockBodiesMsg:     proto_sentry.MessageId_BLOCK_BODIES_63,
+		NewBlockMsg:        proto_sentry.MessageId_NEW_BLOCK_63,
+		GetReceiptsMsg:     proto_sentry.MessageId_GET_RECEIPTS_63,
+		ReceiptsMsg:        proto_sentry.MessageId_RECEIPTS_63,
+	},
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+	// ETH63 - Legacy protocol (no request IDs)
+	direct.ETH63: {
+		proto_sentry.MessageId_STATUS_63:            StatusMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_63:  NewBlockHashesMsg,
+		proto_sentry.MessageId_TRANSACTIONS_63:      TransactionsMsg,
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_63: GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_63:     BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_63:  GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_63:      BlockBodiesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_63:         NewBlockMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_63:      GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_63:          ReceiptsMsg,
+	},
 	direct.ETH67: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
@@ -140,6 +170,15 @@ type StatusPacket struct {
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
+}
+
+// StatusPacket63 is the network packet for the status message for eth/63 (legacy - no ForkID)
+type StatusPacket63 struct {
+	ProtocolVersion uint32
+	NetworkID       uint64
+	TD              *big.Int
+	Head            common.Hash
+	Genesis         common.Hash
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
@@ -365,6 +404,9 @@ type ReceiptsRLPPacket66 struct {
 
 func (*StatusPacket) Name() string { return "Status" }
 func (*StatusPacket) Kind() byte   { return StatusMsg }
+
+func (*StatusPacket63) Name() string { return "Status63" }
+func (*StatusPacket63) Kind() byte   { return StatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }
