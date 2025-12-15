@@ -22,7 +22,7 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
-
+ 
 type MessageId int32
 
 const (
@@ -62,6 +62,17 @@ const (
 	MessageId_POOLED_TRANSACTIONS_66     MessageId = 31
 	// ======= eth 68 protocol ===========
 	MessageId_NEW_POOLED_TRANSACTION_HASHES_68 MessageId = 32
+	// ======= eth 63 protocol (legacy) ===========
+	MessageId_STATUS_63                        MessageId = 33
+	MessageId_NEW_BLOCK_HASHES_63              MessageId = 34
+	MessageId_TRANSACTIONS_63                  MessageId = 35
+	MessageId_GET_BLOCK_HEADERS_63             MessageId = 36
+	MessageId_BLOCK_HEADERS_63                 MessageId = 37
+	MessageId_GET_BLOCK_BODIES_63              MessageId = 38
+	MessageId_BLOCK_BODIES_63                  MessageId = 39
+	MessageId_NEW_BLOCK_63                     MessageId = 40
+	MessageId_GET_RECEIPTS_63                  MessageId = 41
+	MessageId_RECEIPTS_63                      MessageId = 42
 )
 
 // Enum value maps for MessageId.
@@ -99,6 +110,17 @@ var (
 		30: "RECEIPTS_66",
 		31: "POOLED_TRANSACTIONS_66",
 		32: "NEW_POOLED_TRANSACTION_HASHES_68",
+		// ETH63 legacy protocol messages
+		33: "STATUS_63",
+		34: "NEW_BLOCK_HASHES_63",
+		35: "TRANSACTIONS_63",
+		36: "GET_BLOCK_HEADERS_63",
+		37: "BLOCK_HEADERS_63",
+		38: "GET_BLOCK_BODIES_63",
+		39: "BLOCK_BODIES_63",
+		40: "NEW_BLOCK_63",
+		41: "GET_RECEIPTS_63",
+		42: "RECEIPTS_63",
 	}
 	MessageId_value = map[string]int32{
 		"STATUS_65":                        0,
@@ -133,6 +155,17 @@ var (
 		"RECEIPTS_66":                      30,
 		"POOLED_TRANSACTIONS_66":           31,
 		"NEW_POOLED_TRANSACTION_HASHES_68": 32,
+		// ETH63 legacy protocol messages
+		"STATUS_63":                        33,
+		"NEW_BLOCK_HASHES_63":             34,
+		"TRANSACTIONS_63":                 35,
+		"GET_BLOCK_HEADERS_63":            36,
+		"BLOCK_HEADERS_63":                37,
+		"GET_BLOCK_BODIES_63":             38,
+		"BLOCK_BODIES_63":                 39,
+		"NEW_BLOCK_63":                    40,
+		"GET_RECEIPTS_63":                 41,
+		"RECEIPTS_63":                     42,
 	}
 )
 
@@ -213,6 +246,7 @@ const (
 	Protocol_ETH66 Protocol = 1
 	Protocol_ETH67 Protocol = 2
 	Protocol_ETH68 Protocol = 3
+	Protocol_ETH63 Protocol = 4  // Add ETH63 as legacy protocol
 )
 
 // Enum value maps for Protocol.
@@ -222,12 +256,14 @@ var (
 		1: "ETH66",
 		2: "ETH67",
 		3: "ETH68",
+		4: "ETH63",
 	}
 	Protocol_value = map[string]int32{
 		"ETH65": 0,
 		"ETH66": 1,
 		"ETH67": 2,
 		"ETH68": 3,
+		"ETH63": 4,
 	}
 )
 
@@ -303,6 +339,49 @@ func (x PeerEvent_PeerEventId) Number() protoreflect.EnumNumber {
 // Deprecated: Use PeerEvent_PeerEventId.Descriptor instead.
 func (PeerEvent_PeerEventId) EnumDescriptor() ([]byte, []int) {
 	return file_p2psentry_sentry_proto_rawDescGZIP(), []int{21, 0}
+}
+
+type OutboundMessageData63 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutboundMessageData63) Reset() {
+	*x = OutboundMessageData63{}
+	mi := &file_p2psentry_sentry_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutboundMessageData63) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutboundMessageData63) ProtoMessage() {}
+func (x *OutboundMessageData63) ProtoReflect() protoreflect.Message {
+	mi := &file_p2psentry_sentry_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutboundMessageData63.ProtoReflect.Descriptor instead.
+func (*OutboundMessageData63) Descriptor() ([]byte, []int) {
+	return file_p2psentry_sentry_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *OutboundMessageData63) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
 }
 
 type OutboundMessageData struct {
