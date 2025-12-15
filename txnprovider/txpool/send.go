@@ -68,6 +68,12 @@ func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txnSentTo []
 	if len(rlps) == 0 {
 		return
 	}
+
+	// Add logging for transaction broadcasting
+	f.logger.Info("[NODE1] 🚀 Broadcasting transactions to peers",
+		"transaction_count", len(rlps),
+		"max_peers", maxPeers)
+
 	txnSentTo = make([]int, len(rlps))
 	var prev, size int
 	for i, l := 0, len(rlps); i < len(rlps); i++ {
@@ -90,9 +96,20 @@ func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txnSentTo []
 						MaxPeers: maxPeers,
 					}
 				}
+
+				// Add detailed logging before sending
+				f.logger.Info("[NODE1] 📤 Sending TRANSACTIONS_66 message to peers",
+					"data_size", len(txnsData),
+					"max_peers", maxPeers)
+
 				peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txns66)
 				if err != nil {
 					f.logger.Debug("[txpool.send] BroadcastPooledTxns", "err", err)
+				} else {
+					// Add logging for successful send
+					f.logger.Info("[NODE1] ✅ Successfully sent transactions to peers",
+						"peers_count", len(peers.Peers),
+						"transaction_count", i-prev+1)
 				}
 				if peers != nil {
 					for j := prev; j <= i; j++ {
@@ -113,6 +130,12 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 	if len(types) == 0 {
 		return
 	}
+
+	// Add logging for transaction announcements
+	f.logger.Info("[NODE1] 📢 Announcing transaction hashes to peers",
+		"hash_count", len(types),
+		"max_peers", maxPeers)
+
 	prevI := 0
 	prevJ := 0
 	for prevI < len(hashes) || prevJ < len(types) {
@@ -162,6 +185,12 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 						},
 						MaxPeers: maxPeers,
 					}
+
+					// Add logging for hash announcements
+					f.logger.Info("[NODE1] 📤 Sending NEW_POOLED_TRANSACTION_HASHES_66",
+						"hash_count", (i-prevI)/32,
+						"data_size", len(iData))
+
 					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
 						f.logger.Debug("[txpool.send] AnnouncePooledTxns", "err", err)
@@ -171,6 +200,8 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 							hashSentTo[k/32] += len(peers.Peers)
 						}
 					}
+					f.logger.Info("[NODE1] ✅ Successfully announced transaction hashes",
+						"peers_count", len(peers.Peers))
 				}
 			case 68:
 				if j > prevJ {
@@ -181,6 +212,12 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 						},
 						MaxPeers: maxPeers,
 					}
+
+					// Add logging for eth/68 announcements
+					f.logger.Info("[NODE1] 📤 Sending NEW_POOLED_TRANSACTION_HASHES_68",
+						"hash_count", j-prevJ,
+						"data_size", len(jData))
+
 					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
 						f.logger.Debug("[txpool.send] AnnouncePooledTxns68", "err", err)
@@ -190,6 +227,8 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 							hashSentTo[k] += len(peers.Peers)
 						}
 					}
+					f.logger.Info("[NODE1] ✅ Successfully announced transaction hashes (eth/68)",
+						"peers_count", len(peers.Peers))
 				}
 
 			}
