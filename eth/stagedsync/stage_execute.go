@@ -113,7 +113,7 @@ func StageExecuteBlocksCfg(
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-
+	syncCfg.AlwaysGenerateChangesets = true
 	return ExecuteBlockCfg{
 		db:                db,
 		prune:             pm,
@@ -196,6 +196,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 	t := time.Now()
 	var changeset *[kv.DomainLen][]kv.DomainEntryDiff
+	var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
 		currentHash, ok, err := br.CanonicalHash(ctx, tx, currentBlock)
 		if err != nil {
@@ -204,7 +205,26 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		if !ok {
 			return fmt.Errorf("canonical hash not found %d", currentBlock)
 		}
-		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
+		// before calling domains.GetDiffset(...)
+		fmt.Printf("[7s62::unwindExec3] GetDiffset debug:\n")
+		fmt.Printf("  block=%d hash=%s\n", currentBlock, currentHash.Hex())
+		fmt.Printf("  domains: ptr=%p TxNum=%d BlockNum=%d\n", domains, domains.TxNum(), domains.BlockNum())
+		if br != nil {
+			fb := br.FrozenBlocks()
+			fmt.Printf("  blockReader.FrozenBlocks=%d (isFrozen=%v)\n", fb, currentBlock < fb)
+		} else {
+			fmt.Printf("  blockReader=<nil>\n")
+		}
+		if mn, err := txNumsReader.Min(tx, currentBlock); err == nil {
+			if mx, err2 := txNumsReader.Max(tx, currentBlock); err2 == nil {
+				fmt.Printf("  TxNums: min(txnum@block)=%d max(txnum@block)=%d\n", mn, mx)
+			} else {
+				fmt.Printf("  TxNums: min ok, max err=%v\n", err2)
+			}
+		} else {
+			fmt.Printf("  TxNums: min err=%v\n", err)
+		}
+		fmt.Println("[7s62::unwindExec3] domains.GetDiffset", currentHash, currentBlock, domains)
 		currentKeys, ok, err = domains.GetDiffset(tx, currentHash, currentBlock)
 		if !ok {
 			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)

@@ -68,9 +68,11 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.Logger) error {
+	fmt.Println("[BodiesForward] START - BodiesForward called", "blockNumber", s.BlockNumber)
 	var doUpdate bool
 
 	startTime := time.Now()
+	logger.Debug("BodiesForward started", "blockNumber", s.BlockNumber, "test", test)
 
 	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
@@ -112,6 +114,7 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 
 	bodyProgress = s.BlockNumber
 	if bodyProgress >= headerProgress {
+		logger.Debug("BodiesForward: body progress >= header progress, nothing to do", "bodyProgress", bodyProgress, "headerProgress", headerProgress)
 		return nil
 	}
 
@@ -158,17 +161,24 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 		for loopCount := 0; loopCount == 0 || (req != nil && sentToPeer && loopCount < requestLoopCutOff); loopCount++ {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
+			fmt.Println("[BodiesForward:RequestMoreBodies] calling RequestMoreBodies", "loopCount", loopCount)
 			req, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, currentTime, cfg.blockPropagator)
 			if err != nil {
+				logger.Error("RequestMoreBodies failed", "err", err)
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 			peer = [64]byte{}
 			sentToPeer = false
 			if req != nil {
+				fmt.Println("[BodiesForward:RequestMoreBodies] got body request", "blockNums", req.BlockNums, "hashes", req.Hashes)
 				start = time.Now()
+				fmt.Println("[BodiesForward:RequestMoreBodies] calling bodyReqSend (SendBodyRequest)")
 				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 				d2 += time.Since(start)
+				fmt.Println("[BodiesForward:RequestMoreBodies] bodyReqSend result", "sentToPeer", sentToPeer, "peer", peer[:8])
+			} else {
+				fmt.Println("[BodiesForward:RequestMoreBodies] no request needed")
 			}
 			if req != nil && sentToPeer {
 				start = time.Now()
