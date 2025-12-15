@@ -21,12 +21,22 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus/posv"
 	"github.com/tforce-io/tf-golib/stdx/mathxt/bigxt"
 )
+
+func GetCreatorAttestorPairs(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig,
+	header, checkpointHeader *types.Header,
+) (map[common.Address]common.Address, uint64, error) {
+	number := header.Number.Uint64()
+	validators := posv.ExtractValidatorsFromCheckpointHeader(checkpointHeader)
+	attestorIdxs := posv.ExtractAttestorsFromCheckpointHeader(checkpointHeader)
+	return getCreatorAttestorPairs(config, posvConfig, number, validators, attestorIdxs)
+}
 
 // Get eligble validators from the state.
 //
@@ -60,4 +70,27 @@ func GetValidators(vicConfig *chain.VictionConfig, state *state.IntraBlockState,
 		validators = append(validators, candidate.Address)
 	}
 	return validators, nil
+}
+
+func getCreatorAttestorPairs(config *chain.Config, posvConfig *chain.PosvConfig,
+	number uint64, validators []common.Address, attestorIdxs []int64,
+) (map[common.Address]common.Address, uint64, error) {
+	results := map[common.Address]common.Address{}
+	validatorCount := uint64(len(validators))
+	attestorCount := uint64(len(attestorIdxs))
+	offset := uint64(0)
+	if validatorCount > attestorCount {
+		return nil, offset, ErrInvalidAttestorList
+	}
+	if validatorCount > 0 {
+		if config.IsTIPRandomize(number) {
+			offset = ((number % posvConfig.Epoch) / validatorCount) % validatorCount
+		}
+		for i, val := range validators {
+			attIdx := uint64(attestorIdxs[i]) % validatorCount
+			attIdx = (attIdx + offset) % validatorCount
+			results[val] = validators[attIdx]
+		}
+	}
+	return results, offset, nil
 }

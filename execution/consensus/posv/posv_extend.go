@@ -24,10 +24,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/consensus"
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 )
 
 const (
@@ -35,7 +37,10 @@ const (
 )
 
 var (
-	errEmptyValidators = fmt.Errorf("validators is empty")
+	errInvalidBlockAttestor        = fmt.Errorf("invalid block attestor")
+	errEmptyValidators             = fmt.Errorf("validators is empty")
+	errInvalidCheckpointPenalties  = fmt.Errorf("invalid penalty list on checkpoint block")
+	errInvalidCheckpointValidators = fmt.Errorf("invalid validator list on checkpoint block")
 )
 
 // EpochReward stores number of sign made by each validator and rewards for
@@ -67,6 +72,11 @@ type PosvBackend interface {
 		chain consensus.ChainReader,
 	) []types.Transaction
 
+	// Get creator-attestor pairs from the state.
+	PosvGetCreatorAttestorPairs(c *Posv, config *chain.Config,
+		header, checkpointHeader *types.Header,
+	) (map[common.Address]common.Address, uint64, error)
+
 	// Calculate and distribute reward at the end of each epoch.
 	PosvGetEpochReward(c *Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 		header *types.Header,
@@ -84,16 +94,15 @@ type PosvBackend interface {
 	) ([]common.Address, error)
 }
 
-// Get list of validators from checkpoint block header. If the given block is not a checkpoint block,
-// then get list of validators from previous checkpoint block header.
-func GetNearestCheckpointValidators(posvConfig *chain.PosvConfig, header *types.Header, chain consensus.ChainHeaderReader) []common.Address {
+// Check If the given block is a checkpoint block, return it, else return previous checkpoint block header.
+func GetCheckpointHeader(posvConfig *chain.PosvConfig, header *types.Header, chain consensus.ChainHeaderReader) *types.Header {
 	blockNumber := header.Number.Uint64()
 	if blockNumber%posvConfig.Epoch == 0 {
-		return ExtractValidatorsFromCheckpointHeader(header)
+		return header
 	}
 	prevCheckpointBlockNumber := blockNumber - (blockNumber % posvConfig.Epoch)
 	prevCheckpointHeader := chain.GetHeaderByNumber(prevCheckpointBlockNumber)
-	return ExtractValidatorsFromCheckpointHeader(prevCheckpointHeader)
+	return prevCheckpointHeader
 }
 
 // Get all BlockSign transactions for a given block. If it's not cached yet, get it from the state.
@@ -112,7 +121,8 @@ func (c *Posv) GetSignDataForBlock(config *chain.Config, vicConfig *chain.Victio
 // currentIndex, parentIndex, validatorCount.
 func (c *Posv) IsMyTurn(signer common.Address, parentNumber uint64, parentHash common.Hash, chain consensus.ChainHeaderReader) (bool, int, int, int, error) {
 	parent := chain.GetHeader(parentHash, parentNumber)
-	validators := GetNearestCheckpointValidators(c.ChainConfig.Posv, parent, chain)
+	checkpointHeader := GetCheckpointHeader(c.ChainConfig.Posv, parent, chain)
+	validators := ExtractValidatorsFromCheckpointHeader(checkpointHeader)
 	validatorsCount := len(validators)
 	if validatorsCount == 0 {
 		return false, -1, -1, 0, errEmptyValidators
@@ -120,7 +130,7 @@ func (c *Posv) IsMyTurn(signer common.Address, parentNumber uint64, parentHash c
 
 	parentIndex := -1
 	if parentNumber > 0 {
-		parentCreator, err := c.Ecrecover(parent)
+		parentCreator, err := c.Author(parent)
 		if err != nil {
 			return false, 0, 0, 0, err
 		}
@@ -139,6 +149,40 @@ func (c *Posv) calcDifficulty(signer common.Address, parentNumber uint64, parent
 		return big.NewInt(int64(validatorCount - distance + 1))
 	}
 	return big.NewInt(int64(validatorCount + currentIndex - parentIndex))
+}
+
+// Recover the attesor address from a block header
+func (c *Posv) Attestor(header *types.Header) (common.Address, error) {
+	return ecrecover2(header, c.attestSignatures)
+}
+
+// ecrecover2 extracts the Ethereum account address from a Attestor header.
+func ecrecover2(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.Address]) (common.Address, error) {
+	// If the signature's already cached, return that
+	hash := header.Hash()
+
+	// hitrate while straight-forward sync is from 0.5 to 0.65
+	if address, known := sigcache.Peek(hash); known {
+		return address, nil
+	}
+
+	// Retrieve the signature from the header extra-data
+	if len(header.Attestor) != ExtraSeal {
+		return common.Address{}, errMissingSignature
+	}
+	signature := header.Attestor
+
+	// Recover the public key and the Ethereum address
+	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var signer common.Address
+	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+
+	sigcache.Add(hash, signer)
+	return signer, nil
 }
 
 // Decode bytes with format of Block.Attestors into list of attestor numbers.
@@ -177,9 +221,14 @@ func Distance(currentIndex, parentIndex, validatorCount int) int {
 	return validatorCount + currentIndex - parentIndex
 }
 
-// Recover the signer address from a block header
-func (c *Posv) Ecrecover(header *types.Header) (common.Address, error) {
-	return ecrecover(header, c.signatures)
+// Process block header NewAttestors field of a checkpoint block to return the list of new attestors.
+func ExtractAttestorsFromCheckpointHeader(header *types.Header) []int64 {
+	if header == nil {
+		return []int64{}
+	}
+
+	attestors := DecodeAttestorsFromHeader(header.NewAttestors)
+	return attestors
 }
 
 // Process block header Extra field of a checkpoint block to return the list of new validators.

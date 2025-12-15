@@ -44,7 +44,7 @@ func PenalizeValidatorsTIPSigning(c *posv.Posv, config *chain.Config, posvConfig
 	for i := uint64(0); i < posvConfig.Epoch; i++ {
 		epochBlockHashes[i] = blockHash
 		headr := chain.GetHeaderByHash(blockHash)
-		miner, _ := c.Ecrecover(headr)
+		miner, _ := c.Author(headr)
 		if count, ok := blockMiningCounts[miner]; ok {
 			blockMiningCounts[miner] = count + 1
 		} else {

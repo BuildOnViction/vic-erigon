@@ -155,14 +155,10 @@ func (c *Posv) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 
 	// If the block is a checkpoint block, verify the signer list
 	if number%c.config.Epoch == 0 {
-		signers := make([]byte, len(snap.Signers)*length.Addr)
-		for i, signer := range snap.GetSigners() {
-			copy(signers[i*length.Addr:], signer[:])
-		}
-
-		extraSuffix := len(header.Extra) - ExtraSeal
-		if !bytes.Equal(header.Extra[ExtraVanity:extraSuffix], signers) {
-			return errMismatchingCheckpointSigners
+		chain := chain.(consensus.ChainReader)
+		err := c.verifyValidators(chain, header, parents)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -248,48 +244,4 @@ func (c *Posv) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash c
 		c.logger.Trace("Stored voting snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 	return snap, err
-}
-
-// verifySeal checks whether the signature contained in the header satisfies the
-// consensus protocol requirements. The method accepts an optional list of parent
-// headers that aren't yet part of the local blockchain to generate the snapshots
-// from.
-func (c *Posv) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, snap *Snapshot) error {
-	// Verifying the genesis block is not supported
-	number := header.Number.Uint64()
-	if number == 0 {
-		return errUnknownBlock
-	}
-
-	// Resolve the authorization key and check against signers
-	signer, err := ecrecover(header, c.signatures)
-	if err != nil {
-		return err
-	}
-
-	if _, ok := snap.Signers[signer]; !ok {
-		return ErrUnauthorizedSigner
-	}
-
-	for seen, recent := range snap.Recents {
-		if recent == signer {
-			// Signer is among RecentsRLP, only fail if the current block doesn't shift it out
-			if limit := uint64(len(snap.Signers)/2 + 1); seen > number-limit {
-				return ErrRecentlySigned
-			}
-		}
-	}
-
-	// Ensure that the difficulty corresponds to the turn-ness of the signer
-	if !c.FakeDiff {
-		inturn := snap.inturn(header.Number.Uint64(), signer)
-		if inturn && header.Difficulty.Cmp(DiffInTurn) != 0 {
-			return errWrongDifficulty
-		}
-		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
-			return errWrongDifficulty
-		}
-	}
-
-	return nil
 }

@@ -66,6 +66,13 @@ func (s *Ethereum) PosvGetBlockSignData(config *chain.Config, vicConfig *chain.V
 	return data
 }
 
+// Get creator-attestor pairs from the state.
+func (s *Ethereum) PosvGetCreatorAttestorPairs(c *posv.Posv, config *chain.Config,
+	header, checkpointHeader *types.Header,
+) (map[common.Address]common.Address, uint64, error) {
+	return viction.GetCreatorAttestorPairs(c, config, config.Posv, header, checkpointHeader)
+}
+
 // Calculate and distribute reward at checkpoint block.
 func (s *Ethereum) PosvGetEpochReward(c *posv.Posv, config *chain.Config, posvConfig *chain.PosvConfig, vicConfig *chain.VictionConfig,
 	header *types.Header,

@@ -284,7 +284,7 @@ func (c *Posv) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Posv) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	return c.verifyHeader(chain, header, nil)
+	return c.verifyHeaderWithCache(chain, header, nil)
 }
 
 type VerifyHeaderResponse struct {
@@ -356,7 +356,7 @@ func (c *Posv) Prepare(chainH consensus.ChainHeaderReader, header *types.Header,
 	c.lock.RUnlock()
 
 	// Set the correct difficulty
-	header.Difficulty = calcDifficulty(snap, signer)
+	header.Difficulty = c.calcDifficulty(signer, number-1, header.ParentHash, chain)
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < ExtraVanity {
