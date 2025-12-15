@@ -49,9 +49,10 @@ type Config struct {
 	// ETH mainnet upgrades
 	// See https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades
 	HomesteadBlock        *big.Int `json:"homesteadBlock,omitempty"`
+	EIP155Block           *big.Int `json:"eip155Block,omitempty"`
 	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
 	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
-	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
+	SpuriousDragonBlock   *big.Int `json:"eip158Block,omitempty"`
 	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
 	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
 	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
@@ -235,6 +236,11 @@ func (c *Config) getEngine() string {
 // IsHomestead returns whether num is either equal to the homestead block or greater.
 func (c *Config) IsHomestead(num uint64) bool {
 	return isForked(c.HomesteadBlock, num)
+}
+
+// IsEIP155 returns whether num is either equal to the EIP155 fork block or greater.
+func (c *Config) IsEIP155(num uint64) bool {
+	return isForked(c.EIP155Block, num)
 }
 
 // IsDAOFork returns whether num is either equal to the DAO fork block or greater.
@@ -485,6 +491,23 @@ func (c *Config) CheckConfigForkOrder() error {
 
 	for _, fork := range c.forkBlockNumbers() {
 		if lastFork.name != "" {
+			// Special case: if both eip155Block and byzantiumBlock are at block 0, allow it
+			if lastFork.name == "eip155Block" && fork.name == "byzantiumBlock" &&
+				lastFork.blockNumber != nil && fork.blockNumber != nil &&
+				lastFork.blockNumber.Cmp(big.NewInt(0)) == 0 && fork.blockNumber.Cmp(big.NewInt(0)) == 0 {
+				// Allow this case - both forks at genesis
+				lastFork = fork
+				continue
+			}
+
+			// Special case: allow byzantiumBlock without eip155Block for custom chains
+			if lastFork.name == "eip155Block" && fork.name == "byzantiumBlock" &&
+				lastFork.blockNumber == nil && fork.blockNumber != nil {
+				// Allow byzantiumBlock without eip155Block
+				lastFork = fork
+				continue
+			}
+
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
