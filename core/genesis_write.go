@@ -142,9 +142,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
-			logger.Info("Writing main-net genesis block")
-			genesis = MainnetGenesisBlock()
-			custom = false
+			logger.Info("Using custom genesis config for network 1337")
+			genesis = loadCustomGenesis()
+			custom = true
 		}
 		applyOverrides(genesis.Config)
 		block, _, err1 := write(tx, genesis, dirs, logger)
@@ -152,9 +152,16 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			return genesis.Config, nil, err1
 		}
 		if custom {
-			logger.Info("Writing custom genesis block", "hash", block.Hash().String())
+			logger.Info("Writing custom genesis block", "hash", block.Hash())
 		}
 		return genesis.Config, block, nil
+	}
+
+	// Genesis block already exists, check if we need to use custom genesis for network 1337
+	if genesis == nil {
+		// Force custom genesis for network 1337
+		logger.Info("Using custom genesis config for network 1337")
+		genesis = loadCustomGenesis()
 	}
 
 	// Check whether the genesis block is already written.
@@ -427,7 +434,9 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	_ = g.Alloc //nil-check
+	if g.Alloc == nil {
+		g.Alloc = make(types.GenesisAlloc)
+	}
 
 	head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
 
@@ -594,5 +603,38 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return TestGenesisBlock()
 	default:
 		return nil
+	}
+}
+
+func loadCustomGenesis() *types.Genesis {
+	alloc := make(types.GenesisAlloc)
+	balance, _ := big.NewInt(0).SetString("1000000000000000000000", 10)
+	alloc[common.HexToAddress("0xaa49A1336Ad98B59Aff3f20184c97c48ac524A98")] = types.GenesisAccount{
+		Balance: balance,
+	}
+	alloc[common.HexToAddress("0x9f2A789B0831AC55eCe9815d8371040a293c4306")] = types.GenesisAccount{
+		Balance: balance,
+	}
+
+	return &types.Genesis{
+		Config: &chain.Config{
+			ChainID:               big.NewInt(1337),
+			HomesteadBlock:        big.NewInt(0),
+			TangerineWhistleBlock: big.NewInt(0),
+			EIP155Block:           big.NewInt(0),
+			Clique: &chain.CliqueConfig{
+				Period: 5,
+				Epoch:  30000,
+			},
+		},
+		Alloc:      alloc,
+		Nonce:      0x42,
+		Timestamp:  0,
+		Difficulty: big.NewInt(0),
+		GasLimit:   30000000,
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		ExtraData:  common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000aa49A1336Ad98B59Aff3f20184c97c48ac524A98000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 	}
 }
