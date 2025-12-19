@@ -208,19 +208,35 @@ Loop:
 
 		sentToPeer = false
 		currentTime := time.Now()
+		logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders: calling", logPrefix), "currentTime", currentTime)
+
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders returned request", logPrefix), "number", req.Number, "hash", req.Hash, "anchorHeight", req.Number+1)
+			logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders returned request", logPrefix),
+				"number", req.Number,
+				"hash", req.Hash.Hex(),
+				"anchorHeight", req.Number+1,
+				"length", req.Length,
+				"skip", req.Skip,
+				"reverse", req.Reverse,
+				"hashIsZero", req.Hash == (common.Hash{}))
+
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				logger.Debug(fmt.Sprintf("[%s] Requested header", logPrefix), "from", req.Number, "length", req.Length)
+				logger.Info(fmt.Sprintf("[%s] Requested header", logPrefix),
+					"from", req.Number,
+					"length", req.Length,
+					"peer", fmt.Sprintf("%x", peer[:8]))
 				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
 				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			} else {
-				logger.Warn(fmt.Sprintf("[%s] RequestMoreHeaders: request not sent to peer", logPrefix), "number", req.Number)
+				logger.Warn(fmt.Sprintf("[%s] RequestMoreHeaders: request not sent to peer", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex())
 			}
 		} else {
-			logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders returned nil", logPrefix), "penalties", len(penalties))
+			logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders returned nil", logPrefix),
+				"penalties", len(penalties))
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -229,6 +245,10 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
+				logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders: additional request", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"remainingRequests", maxRequests)
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -249,15 +269,32 @@ Loop:
 			}
 			actualProgress := cfg.hd.Progress()
 			logger.Info(fmt.Sprintf("[%s] Progress check", logPrefix), "progress", actualProgress)
+
+			logger.Info(fmt.Sprintf("[%s] RequestSkeleton: calling", logPrefix))
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				// fmt.Println("[HeadersPOW] START - RequestSkeleton", req.Number, req.Length)
+				logger.Info(fmt.Sprintf("[%s] RequestSkeleton returned request", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"length", req.Length,
+					"skip", req.Skip,
+					"hashIsZero", req.Hash == (common.Hash{}))
+
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					logger.Debug(fmt.Sprintf("[%s] Requested skeleton", logPrefix), "from", req.Number, "length", req.Length)
+					logger.Info(fmt.Sprintf("[%s] Requested skeleton", logPrefix),
+						"from", req.Number,
+						"length", req.Length,
+						"peer", fmt.Sprintf("%x", peer[:8]))
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
+				} else {
+					logger.Warn(fmt.Sprintf("[%s] RequestSkeleton: request not sent to peer", logPrefix),
+						"number", req.Number,
+						"hash", req.Hash.Hex())
 				}
+			} else {
+				logger.Debug(fmt.Sprintf("[%s] RequestSkeleton returned nil", logPrefix))
 			}
 		}
 		// fmt.Println("[HeadersPOW] START - InsertHeaders")
