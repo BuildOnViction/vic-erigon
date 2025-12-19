@@ -384,6 +384,7 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []proto_sentry.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	fmt.Println("-> newBlockHashes66", req, sentry)
 	if cs.disableBlockDownload {
 		return nil
 	}
@@ -436,15 +437,18 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 	// Parse the entire packet from scratch
 	var pkt eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
+		fmt.Println("-> blockHeaders66::1", err)
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
 
 	// Prepare to extract raw headers from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
+		fmt.Println("-> blockHeaders66::2", err)
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
 	if _, err := rlpStream.Uint(); err != nil { // Now stream is at the requestID field
+		fmt.Println("-> blockHeaders66::3", err)
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Now stream is at the BlockHeadersPacket, which is list of headers
@@ -463,6 +467,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	}
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
+		fmt.Println("-> blockHeaders::1", err)
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Extract headers from the block
@@ -472,6 +477,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	for _, header := range pkt {
 		headerRaw, err := rlpStream.Raw()
 		if err != nil {
+			fmt.Println("-> blockHeaders::2", err)
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
 		hRaw := append([]byte{}, headerRaw...)
@@ -509,14 +515,34 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 
 		if canRequestMore {
 			currentTime := time.Now()
+			cs.logger.Info("[blockHeaders66] Requesting more headers",
+				"currentTime", currentTime,
+				"highestBlock", highestBlock)
+
 			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 			if req != nil {
+				cs.logger.Info("[blockHeaders66] Got request from RequestMoreHeaders",
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"length", req.Length,
+					"hashIsZero", req.Hash == (common.Hash{}))
+
 				if peer, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+					cs.logger.Info("[blockHeaders66] Successfully sent header request",
+						"peer", fmt.Sprintf("%x", peer[:8]),
+						"number", req.Number)
 					cs.Hd.UpdateStats(req, false /* skeleton */, peer)
 					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
+				} else {
+					cs.logger.Warn("[blockHeaders66] Failed to send header request",
+						"number", req.Number)
 				}
+			} else {
+				cs.logger.Debug("[blockHeaders66] No request from RequestMoreHeaders",
+					"penalties", len(penalties))
 			}
 			if len(penalties) > 0 {
+				cs.logger.Info("[blockHeaders66] Applying penalties", "count", len(penalties))
 				cs.Penalize(ctx, penalties)
 			}
 		}
@@ -526,6 +552,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		MinBlock: highestBlock,
 	}
 	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		fmt.Println("-> blockHeaders::3", err1)
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
@@ -1095,16 +1122,36 @@ func (cs *MultiClient) processHeaders63(ctx context.Context, headers []*types.He
 	} else {
 		sort.Sort(headerdownload.HeadersSort(csHeaders))
 		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, sentry.ConvertH512ToPeerID(peerID))
+
 		if canRequestMore {
 			currentTime := time.Now()
+			cs.logger.Info("[processHeaders63] Requesting more headers",
+				"currentTime", currentTime)
+
 			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 			if req != nil {
+				cs.logger.Info("[processHeaders63] Got request from RequestMoreHeaders",
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"length", req.Length,
+					"hashIsZero", req.Hash == (common.Hash{}))
+
 				if peer, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-					cs.Hd.UpdateStats(req, false, peer)
-					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second)
+					cs.logger.Info("[processHeaders63] Successfully sent header request",
+						"peer", fmt.Sprintf("%x", peer[:8]),
+						"number", req.Number)
+					cs.Hd.UpdateStats(req, false /* skeleton */, peer)
+					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
+				} else {
+					cs.logger.Warn("[processHeaders63] Failed to send header request",
+						"number", req.Number)
 				}
+			} else {
+				cs.logger.Debug("[processHeaders63] No request from RequestMoreHeaders",
+					"penalties", len(penalties))
 			}
 			if len(penalties) > 0 {
+				cs.logger.Info("[processHeaders63] Applying penalties", "count", len(penalties))
 				cs.Penalize(ctx, penalties)
 			}
 		}
