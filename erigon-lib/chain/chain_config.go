@@ -601,6 +601,14 @@ func (c *Config) CheckConfigForkOrder() error {
 				continue
 			}
 
+			// Special case: allow tip2019Block without istanbulBlock for custom chains
+			if lastFork.name == "istanbulBlock" && fork.name == "tip2019Block" &&
+				lastFork.blockNumber == nil && fork.blockNumber != nil {
+				// Allow tip2019Block without tip2019Block
+				lastFork = fork
+				continue
+			}
+
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
