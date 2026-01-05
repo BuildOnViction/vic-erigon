@@ -198,6 +198,7 @@ func Handshake(
 	}
 
 	var statusMessage StatusMessage
+	fmt.Println("-> Handshake: Reading status message", statusMessage)
 	if err := readMessage(conn, 16+eth.StatusMsg, HandshakeErrorIDStatusDecode, &statusMessage); err != nil {
 		return &helloMessage, nil, err
 	}

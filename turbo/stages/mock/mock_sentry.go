@@ -188,10 +188,11 @@ func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *proto_sentr
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToAll(ctx context.Context, r *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
+
 func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
 	return ms.sentMessages[i]
 }
@@ -228,6 +229,11 @@ func (ms *MockSentry) PeerEvents(req *proto_sentry.PeerEventsRequest, server pro
 
 func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInfoReply, error) {
 	return nil, nil
+}
+
+func (ms *MockSentry) SendMessageToRandomPeers63(_ context.Context, r *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
+	return &proto_sentry.SentPeers{}, nil
 }
 
 const blockBufferSize = 128

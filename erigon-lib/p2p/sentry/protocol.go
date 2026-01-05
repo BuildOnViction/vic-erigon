@@ -12,7 +12,10 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 			}
 		}
 	}
-
+	// Handle ETH/63 message ID
+	if m >= 33 && m <= 42 {
+		return sentryproto.Protocol_ETH63
+	}
 	return -1
 }
 
@@ -48,5 +51,17 @@ var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+	},
+	sentryproto.Protocol_ETH63: {
+		sentryproto.MessageId_STATUS_63:            struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_HASHES_63:  struct{}{},
+		sentryproto.MessageId_TRANSACTIONS_63:      struct{}{},
+		sentryproto.MessageId_GET_BLOCK_HEADERS_63: struct{}{},
+		sentryproto.MessageId_BLOCK_HEADERS_63:     struct{}{},
+		sentryproto.MessageId_GET_BLOCK_BODIES_63:  struct{}{},
+		sentryproto.MessageId_BLOCK_BODIES_63:      struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_63:         struct{}{},
+		sentryproto.MessageId_GET_RECEIPTS_63:      struct{}{},
+		sentryproto.MessageId_RECEIPTS_63:          struct{}{},
 	},
 }

@@ -172,6 +172,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 
 func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
 	pos, _, err = rlp.ParseList(payload, pos)
+	fmt.Println("------> ParseTransactions: Parsing list", payload, pos, err)
 	if err != nil {
 		return 0, err
 	}

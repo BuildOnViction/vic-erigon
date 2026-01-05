@@ -13,6 +13,7 @@ import (
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	"fmt"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -116,10 +117,14 @@ func (c *sentryClient) HandShake(ctx context.Context, in *emptypb.Empty, opts ..
 }
 
 func (c *sentryClient) SendMessageByMinBlock(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error) {
+	fmt.Println("-> SendMessageByMinBlock", in)
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	fmt.Println("-> SendMessageByMinBlock cOpts", cOpts)
 	out := new(SentPeers)
+	fmt.Println("-> SendMessageByMinBlock out", out)
 	err := c.cc.Invoke(ctx, Sentry_SendMessageByMinBlock_FullMethodName, in, out, cOpts...)
 	if err != nil {
+		fmt.Println("-> SendMessageByMinBlock error", err)
 		return nil, err
 	}
 	return out, nil

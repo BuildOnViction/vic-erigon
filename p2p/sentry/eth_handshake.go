@@ -18,9 +18,11 @@ package sentry
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/rlp"
 	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon-p2p/forkid"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
@@ -60,12 +62,40 @@ func tryDecodeStatusMessage(msg *p2p.Msg) (*eth.StatusPacket, error) {
 		return nil, fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 	}
 
-	var reply eth.StatusPacket
-	if err := msg.Decode(&reply); err != nil {
-		return nil, fmt.Errorf("decode message %v: %w", msg, err)
+	// Read the message data into a buffer
+	data := make([]byte, msg.Size)
+	if _, err := io.ReadFull(msg.Payload, data); err != nil {
+		return nil, fmt.Errorf("failed to read message data: %w", err)
 	}
 
-	return &reply, nil
+	// First try to decode as modern StatusPacket (ETH/64+)
+	var reply eth.StatusPacket
+	if err := rlp.DecodeBytes(data, &reply); err == nil {
+		fmt.Printf("-> Decoded as modern StatusPacket (ETH/64+)\n")
+		return &reply, nil
+	}
+
+	// If that fails, try to decode as legacy StatusPacket63 (ETH/63)
+	fmt.Printf("-> Failed to decode as modern StatusPacket, trying ETH/63 format\n")
+
+	var reply63 eth.StatusPacket63
+	if err := rlp.DecodeBytes(data, &reply63); err != nil {
+		return nil, fmt.Errorf("decode message as both modern and ETH/63 format failed: %w", err)
+	}
+
+	fmt.Printf("-> Successfully decoded as ETH/63 StatusPacket\n")
+
+	// Convert StatusPacket63 to StatusPacket with empty ForkID
+	modernReply := &eth.StatusPacket{
+		ProtocolVersion: reply63.ProtocolVersion,
+		NetworkID:       reply63.NetworkID,
+		TD:              reply63.TD,
+		Head:            reply63.Head,
+		Genesis:         reply63.Genesis,
+		ForkID:          forkid.ID{}, // Empty ForkID for ETH/63
+	}
+
+	return modernReply, nil
 }
 
 func checkPeerStatusCompatibility(
@@ -75,8 +105,14 @@ func checkPeerStatusCompatibility(
 	minVersion uint,
 ) error {
 	networkID := status.NetworkId
+
 	if reply.NetworkID != networkID {
-		return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
+		// Special case: allow Network ID 1 when Chain ID is 1337 (Geth 1.9.9 behavior)
+		if reply.NetworkID == 1 && networkID == 1337 {
+			fmt.Printf("-> Allowing Network ID 1 for Chain ID 1337 (Geth 1.9.9 compatibility)\n")
+		} else {
+			return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
+		}
 	}
 
 	if uint(reply.ProtocolVersion) > version {
@@ -91,6 +127,15 @@ func checkPeerStatusCompatibility(
 		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 	}
 
-	forkFilter := forkid.NewFilterFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime)
-	return forkFilter(reply.ForkID)
+	// Skip ForkID validation for ETH/63 (empty ForkID)
+	if reply.ForkID.Hash != [4]byte{} || reply.ForkID.Next != 0 {
+		forkFilter := forkid.NewFilterFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime)
+		if err := forkFilter(reply.ForkID); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("-> Skipping ForkID validation for ETH/63 peer\n")
+	}
+
+	return nil
 }

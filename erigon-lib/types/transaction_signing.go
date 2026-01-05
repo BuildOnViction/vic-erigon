@@ -89,7 +89,15 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.chainID.Set(&chainId)
 		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsHomestead(blockNumber):
+		signer.protected = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case config.IsEIP155(blockNumber):
+		signer.protected = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	default:
+		// fmt.Println("[7s62::MakeSigner] default to malleable")
 		// Only allow malleable transactions in Frontier
 		signer.malleable = true
 	}
@@ -109,7 +117,6 @@ func MakeFrontierSigner() *Signer {
 // any block number in the chain config.
 //
 // Use this in transaction-handling code where the current block number is unknown. If you
-// have the current block number available, use MakeSigner instead.
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
@@ -119,6 +126,7 @@ func LatestSigner(config *chain.Config) *Signer {
 	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Lsh(chainId, 1) // ×2
+
 	if config.ChainID != nil {
 		if config.CancunTime != nil {
 			signer.blob = true
@@ -130,7 +138,7 @@ func LatestSigner(config *chain.Config) *Signer {
 			signer.accessList = true
 		}
 		if config.SpuriousDragonBlock != nil {
-			signer.protected = true
+			signer.protected = true // --> EIP155
 		}
 		if config.PragueTime != nil {
 			signer.setCode = true
