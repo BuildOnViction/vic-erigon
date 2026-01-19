@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon-p2p/forkid"
@@ -33,23 +35,54 @@ func readAndValidatePeerStatusMessage(
 	status *proto_sentry.StatusData,
 	version uint,
 	minVersion uint,
+	logger log.Logger,
 ) (*eth.StatusPacket, *p2p.PeerError) {
 	msg, err := rw.ReadMsg()
 	if err != nil {
 		return nil, p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscNetworkError, err, "readAndValidatePeerStatusMessage rw.ReadMsg error")
 	}
 
+	// Log that we received a message, regardless of validity
+	logger.Info("-> Received message from peer",
+		"msgCode", fmt.Sprintf("0x%02x", msg.Code),
+		"msgSize", msg.Size,
+		"expectedCode", fmt.Sprintf("0x%02x", eth.StatusMsg))
+
 	reply, err := tryDecodeStatusMessage(&msg)
 	msg.Discard()
 	if err != nil {
+		// Don't log error, just return it silently
 		return nil, p2p.NewPeerError(p2p.PeerErrorStatusDecode, p2p.DiscProtocolError, err, "readAndValidatePeerStatusMessage tryDecodeStatusMessage error")
 	}
 
-	err = checkPeerStatusCompatibility(reply, status, version, minVersion)
+	logger.Info("-> Received peer status message",
+		"networkID", reply.NetworkID,
+		"protocolVersion", reply.ProtocolVersion,
+		"genesis", reply.Genesis.Hex(),
+		"head", reply.Head.Hex(),
+		"forkID", fmt.Sprintf("%x/%d", reply.ForkID.Hash, reply.ForkID.Next))
+
+	err = checkPeerStatusCompatibility(reply, status, version, minVersion, logger)
 	if err != nil {
+		ourGenesisBytes := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
+		ourGenesis := common.BytesToHash(ourGenesisBytes[:])
+		logger.Warn("-> Status message rejected - incompatibility detected",
+			"reason", err.Error(),
+			"peerNetworkID", reply.NetworkID,
+			"ourNetworkID", status.NetworkId,
+			"peerGenesis", reply.Genesis.Hex(),
+			"ourGenesis", ourGenesis.Hex(),
+			"peerProtocolVersion", reply.ProtocolVersion,
+			"ourMaxVersion", version,
+			"ourMinVersion", minVersion,
+			"peerForkID", fmt.Sprintf("%x/%d", reply.ForkID.Hash, reply.ForkID.Next))
 		return nil, p2p.NewPeerError(p2p.PeerErrorStatusIncompatible, p2p.DiscUselessPeer, err, "readAndValidatePeerStatusMessage checkPeerStatusCompatibility error")
 	}
 
+	logger.Info("-> Status message validated successfully",
+		"networkID", reply.NetworkID,
+		"protocolVersion", reply.ProtocolVersion,
+		"genesis", reply.Genesis.Hex())
 	return reply, nil
 }
 
@@ -71,19 +104,14 @@ func tryDecodeStatusMessage(msg *p2p.Msg) (*eth.StatusPacket, error) {
 	// First try to decode as modern StatusPacket (ETH/64+)
 	var reply eth.StatusPacket
 	if err := rlp.DecodeBytes(data, &reply); err == nil {
-		fmt.Printf("-> Decoded as modern StatusPacket (ETH/64+)\n")
 		return &reply, nil
 	}
 
 	// If that fails, try to decode as legacy StatusPacket63 (ETH/63)
-	fmt.Printf("-> Failed to decode as modern StatusPacket, trying ETH/63 format\n")
-
 	var reply63 eth.StatusPacket63
 	if err := rlp.DecodeBytes(data, &reply63); err != nil {
 		return nil, fmt.Errorf("decode message as both modern and ETH/63 format failed: %w", err)
 	}
-
-	fmt.Printf("-> Successfully decoded as ETH/63 StatusPacket\n")
 
 	// Convert StatusPacket63 to StatusPacket with empty ForkID
 	modernReply := &eth.StatusPacket{
@@ -103,38 +131,61 @@ func checkPeerStatusCompatibility(
 	status *proto_sentry.StatusData,
 	version uint,
 	minVersion uint,
+	logger log.Logger,
 ) error {
 	networkID := status.NetworkId
+	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 
+	// Check Network ID
 	if reply.NetworkID != networkID {
 		// Special case: allow Network ID 1 when Chain ID is 1337 (Geth 1.9.9 behavior)
 		if reply.NetworkID == 1 && networkID == 1337 {
-			fmt.Printf("-> Allowing Network ID 1 for Chain ID 1337 (Geth 1.9.9 compatibility)\n")
+			logger.Debug("-> Allowing Network ID 1 for Chain ID 1337 (Geth 1.9.9 compatibility)")
 		} else {
+			logger.Warn("-> Network ID mismatch",
+				"peerNetworkID", reply.NetworkID,
+				"ourNetworkID", networkID)
 			return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
 		}
 	}
 
+	// Check Protocol Version
 	if uint(reply.ProtocolVersion) > version {
+		logger.Warn("-> Protocol version too high",
+			"peerVersion", reply.ProtocolVersion,
+			"maxSupported", version)
 		return fmt.Errorf("version is more than what this senty supports: theirs %d, max %d", reply.ProtocolVersion, version)
 	}
 	if uint(reply.ProtocolVersion) < minVersion {
+		logger.Warn("-> Protocol version too low",
+			"peerVersion", reply.ProtocolVersion,
+			"minRequired", minVersion)
 		return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", reply.ProtocolVersion, minVersion)
 	}
 
-	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
-	if reply.Genesis != genesisHash {
+	// Check Genesis Hash
+	genesisHashCommon := common.BytesToHash(genesisHash[:])
+	if reply.Genesis != genesisHashCommon {
+		logger.Warn("-> Genesis hash mismatch",
+			"peerGenesis", reply.Genesis.Hex(),
+			"ourGenesis", genesisHashCommon.Hex())
 		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 	}
 
+	// Check ForkID
 	// Skip ForkID validation for ETH/63 (empty ForkID)
 	if reply.ForkID.Hash != [4]byte{} || reply.ForkID.Next != 0 {
 		forkFilter := forkid.NewFilterFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime)
 		if err := forkFilter(reply.ForkID); err != nil {
+			logger.Warn("-> ForkID mismatch",
+				"peerForkID", fmt.Sprintf("%x/%d", reply.ForkID.Hash, reply.ForkID.Next),
+				"error", err.Error())
 			return err
 		}
+		logger.Debug("-> ForkID validated successfully",
+			"forkID", fmt.Sprintf("%x/%d", reply.ForkID.Hash, reply.ForkID.Next))
 	} else {
-		fmt.Printf("-> Skipping ForkID validation for ETH/63 peer\n")
+		logger.Debug("-> Skipping ForkID validation for ETH/63 peer")
 	}
 
 	return nil

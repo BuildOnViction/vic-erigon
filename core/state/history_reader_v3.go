@@ -139,9 +139,22 @@ func (hr *HistoryReaderV3) HasStorage(address common.Address) (bool, error) {
 func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
+	code, ok, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
+		fmt.Printf("ReadAccountCode [%x] txNum=%d => [%x] ok=%v err=%v\n", address, hr.txNum, code, ok, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(code) == 0 {
+		// Try GetLatest as fallback for genesis state
+		latestCode, _, err2 := hr.ttx.GetLatest(kv.CodeDomain, address[:])
+		if hr.trace {
+			fmt.Printf("ReadAccountCode fallback GetLatest [%x] => [%x] err=%v\n", address, latestCode, err2)
+		}
+		if err2 == nil && len(latestCode) > 0 {
+			return latestCode, nil
+		}
 	}
 	return code, err
 }

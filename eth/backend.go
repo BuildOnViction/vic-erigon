@@ -389,7 +389,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
+		// Pass rawChainDB for PoSV to create temporal transaction if needed
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlockWithDB(tx, rawChainDB, genesisSpec, config.OverrideOsakaTime, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -605,6 +606,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
+	} else if chainConfig.Posv != nil {
+		consensusConfig = params.PosvSnapshot
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {

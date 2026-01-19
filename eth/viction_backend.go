@@ -18,6 +18,7 @@ package eth
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -118,10 +119,18 @@ func (s *Ethereum) PosvGetPenalties(c *posv.Posv, config *chain.Config, posvConf
 // Get eligble validators from the state.
 func (s *Ethereum) PosvGetValidators(vicConfig *chain.VictionConfig, header *types.Header, chain consensus.ChainReader,
 ) ([]common.Address, error) {
+	fmt.Println("-> PosvGetValidators", "header", header.Hash().Hex(), "number", header.Number.Uint64())
 	tx, _ := s.chainDB.BeginTemporalRo(context.TODO())
 	defer tx.Rollback()
-	block := chain.GetBlock(header.Hash(), header.Number.Uint64())
-	state := s.GetHistoricalStateReader(tx, block)
+
+	// During header verification, the block body may not exist yet
+	// Use the header's number directly to create the state reader
+	blockNumber := header.Number.Uint64()
+	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNumber, 0, rawdbv3.TxNums)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create history state reader: %w", err)
+	}
+	state := state.New(reader)
 	return viction.GetValidators(vicConfig, state, s.contractBackend)
 }
 
@@ -133,6 +142,12 @@ func (s *Ethereum) GetStateReader(tx kv.TemporalTx) *state.IntraBlockState {
 
 // Return a state.IntraBlockState instance to access low level contract storage.
 func (s *Ethereum) GetHistoricalStateReader(tx kv.TemporalTx, block *types.Block) *state.IntraBlockState {
+	if block == nil {
+		// During header verification, block may be nil
+		// This function should not be called in that context
+		return nil
+	}
+	fmt.Println("-> GetHistoricalStateReader", "block", block.NumberU64(), "hash", block.Hash().Hex())
 	reader, _ := rpchelper.CreateHistoryStateReader(tx, block.NumberU64(), 0, rawdbv3.TxNums)
 	return state.New(reader)
 }

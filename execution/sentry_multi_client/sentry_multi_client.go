@@ -402,7 +402,6 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 		if cs.Hd.HasLink(announce.Hash) {
 			continue
 		}
-		//cs.logger.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{

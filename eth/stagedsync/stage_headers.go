@@ -208,11 +208,11 @@ Loop:
 
 		sentToPeer = false
 		currentTime := time.Now()
-		logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders: calling", logPrefix), "currentTime", currentTime)
+		logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders: calling", logPrefix), "currentTime", currentTime)
 
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders returned request", logPrefix),
+			logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders returned request", logPrefix),
 				"number", req.Number,
 				"hash", req.Hash.Hex(),
 				"anchorHeight", req.Number+1,
@@ -223,7 +223,7 @@ Loop:
 
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				logger.Info(fmt.Sprintf("[%s] Requested header", logPrefix),
+				logger.Debug(fmt.Sprintf("[%s] Requested header", logPrefix),
 					"from", req.Number,
 					"length", req.Length,
 					"peer", fmt.Sprintf("%x", peer[:8]))
@@ -268,12 +268,12 @@ Loop:
 				return err
 			}
 			actualProgress := cfg.hd.Progress()
-			logger.Info(fmt.Sprintf("[%s] Progress check", logPrefix), "progress", actualProgress)
+			logger.Debug(fmt.Sprintf("[%s] Progress check", logPrefix), "progress", actualProgress)
 
-			logger.Info(fmt.Sprintf("[%s] RequestSkeleton: calling", logPrefix))
+			logger.Debug(fmt.Sprintf("[%s] RequestSkeleton: calling", logPrefix))
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				logger.Info(fmt.Sprintf("[%s] RequestSkeleton returned request", logPrefix),
+				logger.Debug(fmt.Sprintf("[%s] RequestSkeleton returned request", logPrefix),
 					"number", req.Number,
 					"hash", req.Hash.Hex(),
 					"length", req.Length,
@@ -289,9 +289,9 @@ Loop:
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
 				} else {
-					logger.Warn(fmt.Sprintf("[%s] RequestSkeleton: request not sent to peer", logPrefix),
-						"number", req.Number,
-						"hash", req.Hash.Hex())
+					// logger.Warn(fmt.Sprintf("[%s] RequestSkeleton: request not sent to peer", logPrefix),
+					// 	"number", req.Number,
+					// 	"hash", req.Hash.Hex())
 				}
 			} else {
 				logger.Debug(fmt.Sprintf("[%s] RequestSkeleton returned nil", logPrefix))

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-p2p/forkid"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
 	"github.com/erigontech/erigon-p2p/testutil"
@@ -56,42 +57,43 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		MaxBlockHeight: 0,
 	}
 
+	logger := log.New()
 	t.Run("ok", func(t *testing.T) {
-		err := checkPeerStatusCompatibility(&goodReply, &status, version, version)
+		err := checkPeerStatusCompatibility(&goodReply, &status, version, version, logger)
 		assert.NoError(t, err)
 	})
 	t.Run("network mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.NetworkID = 0
-		err := checkPeerStatusCompatibility(&reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version, logger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "network")
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 - 1
-		err := checkPeerStatusCompatibility(&reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version, logger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 + 1
-		err := checkPeerStatusCompatibility(&reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version, logger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.Genesis = common.Hash{}
-		err := checkPeerStatusCompatibility(&reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version, logger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "genesis")
 	})
 	t.Run("fork mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.ForkID = forkid.ID{}
-		err := checkPeerStatusCompatibility(&reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version, logger)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})
