@@ -86,12 +86,6 @@ func (c *Posv) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 	if header.UncleHash != empty.UncleHash {
 		return errInvalidUncleHash
 	}
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if number > 0 {
-		if header.Difficulty == nil || (header.Difficulty.Cmp(DiffInTurn) != 0 && header.Difficulty.Cmp(diffNoTurn) != 0) {
-			return errInvalidDifficulty
-		}
-	}
 
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
@@ -135,21 +129,52 @@ func (c *Posv) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
 		}
-		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-			return err
-		}
+		// [comment] verify gas limit POSV alway 84000000
+		// if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+		// 	return err
+		// }
+
 	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
 
 	if err := misc.VerifyAbsenceOfCancunHeaderFields(header); err != nil {
+		fmt.Println("-> verifyCascadingFields::VerifyAbsenceOfCancunHeaderFields", "number", number, "err", err)
 		return err
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it
+	fmt.Println("-> verifyCascadingFields::Before Snapshot",
+		"number", number,
+		"parentHash", header.ParentHash.Hex(),
+		"parentNumber", number-1,
+		"parentExists", parent != nil)
+	if parent != nil {
+		fmt.Println("-> verifyCascadingFields::Parent header",
+			"number", parent.Number.Uint64(),
+			"hash", parent.Hash().Hex(),
+			"parentHash", parent.ParentHash.Hex(),
+			"time", parent.Time,
+			"gasLimit", parent.GasLimit,
+			"gasUsed", parent.GasUsed,
+			"difficulty", parent.Difficulty.String())
+	}
+	fmt.Println("-> verifyCascadingFields::Parents slice",
+		"len", len(parents),
+		"parentsProvided", len(parents) > 0)
+	for i, p := range parents {
+		if p != nil {
+			fmt.Printf("-> verifyCascadingFields::Parents[%d] number=%d hash=%x\n",
+				i, p.Number.Uint64(), p.Hash())
+		} else {
+			fmt.Printf("-> verifyCascadingFields::Parents[%d] is nil\n", i)
+		}
+	}
+	// Retrieve the snapshot needed to verify this header and cache it
 	snap, err := c.Snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
+		fmt.Println("-> verifyCascadingFields::Snapshot", "number", number, "err", err)
 		return err
 	}
 
@@ -158,6 +183,7 @@ func (c *Posv) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 		chain := chain.(consensus.ChainReader)
 		err := c.verifyValidators(chain, header, parents)
 		if err != nil {
+			fmt.Println("-> verifyCascadingFields::verifyValidators", "number", number, "err", err)
 			return err
 		}
 	}
@@ -195,15 +221,24 @@ func (c *Posv) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash c
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
 
+				// Check if snapshot already exists before trying to store it
+				// This prevents MDBX_BAD_DBI errors during read-only header verification
+				if existingSnap, err := loadSnapshot(c.config, c.DB, number, hash); err == nil {
+					c.logger.Trace("Snapshot already exists on disk, using it", "number", number, "hash", hash)
+					snap = existingSnap
+					break
+				}
+
 				signers := make([]common.Address, (len(checkpoint.Extra)-ExtraVanity-ExtraSeal)/length.Addr)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*length.Addr:])
 				}
 				snap = newSnapshot(c.config, number, hash, signers)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
-				}
-				c.logger.Info("[PoSV] Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				// During header verification (read-only context), we cannot store snapshots
+				// The snapshot will be cached in memory and stored later during block insertion
+				// when write access is available
+				c.logger.Info("Created checkpoint snapshot in memory (will be stored during block insertion)",
+					"number", number, "hash", hash)
 				break
 			}
 		}

@@ -561,16 +561,34 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
+			// Log which consensus engine is being used
+			consensusType := hd.engine.Type()
+			hd.logger.Info("[downloader] VerifyHeader: using consensus engine",
+				"consensus", consensusType,
+				"hash", link.hash,
+				"height", link.blockHeight)
+
 			err := hd.VerifyHeader(link.header)
 			if err != nil {
-				hd.logger.Error("[downloader] InsertHeader: VerifyHeader error", "hash", link.hash, "height", link.blockHeight, "err", err)
+				hd.logger.Error("[downloader] InsertHeader: VerifyHeader error",
+					"hash", link.hash,
+					"height", link.blockHeight,
+					"consensus", consensusType,
+					"err", err)
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
-					hd.logger.Warn("[downloader] Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
+					hd.logger.Warn("[downloader] Added future link",
+						"hash", link.hash,
+						"height", link.blockHeight,
+						"timestamp", link.header.Time)
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
-					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
+					hd.logger.Debug("[downloader] Verification failed for header",
+						"hash", link.hash,
+						"height", link.blockHeight,
+						"consensus", consensusType,
+						"err", err)
 					hd.removeUpwards(link)
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
@@ -590,6 +608,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
+			fmt.Println("-> InsertHeader: FeedHeaderFunc error", "err", err)
 			return false, false, 0, lastTime, err
 		}
 		// Some blocks may be marked as non-valid on PoS chain because they were far into the future.

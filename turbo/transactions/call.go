@@ -53,20 +53,56 @@ func DoCall(
 	headerReader interfaces.HeaderReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
-	// todo: Pending state is only known by the miner
-	/*
-		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
-			block, state, _ := b.eth.miner.Pending()
-			return state, block.Header(), nil
-		}
-	*/
-
 	state := state.New(stateReader)
+
+	// Log state creation
+	blockNum := uint64(0)
+	if header != nil {
+		blockNum = header.Number.Uint64()
+	}
+	var toAddr common.Address
+	if args.To != nil {
+		toAddr = *args.To
+	}
+	log.Info("[DoCall] Creating state",
+		"block", blockNum,
+		"to", toAddr.Hex(),
+		"stateReader", fmt.Sprintf("%T", stateReader))
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
 		if err := overrides.Override(state); err != nil {
+			log.Error("[DoCall] Override failed", "err", err)
 			return nil, err
+		}
+	}
+
+	// Check contract code and account state
+	if args.To != nil {
+		code, err := state.GetCode(*args.To)
+		if err != nil {
+			log.Warn("[DoCall] Failed to get contract code", "addr", args.To.Hex(), "err", err, "block", blockNum)
+		} else {
+			log.Info("[DoCall] Contract code from state",
+				"addr", args.To.Hex(),
+				"codeLen", len(code),
+				"code", common.Bytes2Hex(code),
+				"block", blockNum)
+		}
+
+		// Check account balance and nonce
+		balance, err := state.GetBalance(*args.To)
+		if err != nil {
+			log.Warn("[DoCall] Failed to get balance", "addr", args.To.Hex(), "err", err)
+		} else {
+			log.Info("[DoCall] Account balance", "addr", args.To.Hex(), "balance", balance.String(), "block", blockNum)
+		}
+
+		nonce, err := state.GetNonce(*args.To)
+		if err != nil {
+			log.Warn("[DoCall] Failed to get nonce", "addr", args.To.Hex(), "err", err)
+		} else {
+			log.Info("[DoCall] Account nonce", "addr", args.To.Hex(), "nonce", nonce, "block", blockNum)
 		}
 	}
 
@@ -94,8 +130,18 @@ func DoCall(
 	}
 	msg, err := args.ToMessage(gasCap, baseFee)
 	if err != nil {
+		log.Error("[DoCall] Failed to create message", "err", err)
 		return nil, err
 	}
+
+	log.Info("[DoCall] Message created",
+		"from", msg.From().Hex(),
+		"to", msg.To().Hex(),
+		"gas", msg.Gas(),
+		"value", msg.Value().String(),
+		"dataLen", len(msg.Data()),
+		"block", blockNum)
+
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
@@ -111,6 +157,7 @@ func DoCall(
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
+		log.Error("[DoCall] ApplyMessage failed", "err", err, "block", blockNum, "to", toAddr.Hex())
 		return nil, err
 	}
 
@@ -118,6 +165,16 @@ func DoCall(
 	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
+
+	log.Info("[DoCall] ApplyMessage completed",
+		"block", blockNum,
+		"to", toAddr.Hex(),
+		"gasUsed", result.GasUsed,
+		"returnDataLen", len(result.ReturnData),
+		"returnData", common.Bytes2Hex(result.ReturnData),
+		"failed", result.Failed(),
+		"err", result.Err)
+
 	return result, nil
 }
 

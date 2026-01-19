@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/params"
@@ -192,6 +193,102 @@ func TestAllocConstructor(t *testing.T) {
 	storage1 := &uint256.Int{}
 	state.GetState(address, key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
+}
+
+// TestPoSVGenesisState tests that PoSV genesis state is written to database and queryable
+// First step: Test only contract 0x68 (FoundationMultiSigWallet)
+func TestPoSVGenesisState(t *testing.T) {
+	t.Parallel()
+	require := require.New(t)
+	assert := assert.New(t)
+	logger := log.New()
+
+	// Step 1: Setup - Load Viction genesis (PoSV consensus)
+	t.Log("Step 1: Loading Viction genesis")
+	genesis := core.VictionGenesisBlock()
+	require.NotNil(genesis, "Genesis should not be nil")
+	require.NotNil(genesis.Config, "Genesis config should not be nil")
+	require.NotNil(genesis.Config.Posv, "Viction should use PoSV consensus")
+	require.NotEmpty(genesis.Alloc, "Genesis alloc should not be empty")
+
+	// Step 2: Setup - Create temporal test database
+	t.Log("Step 2: Creating temporal test database")
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+
+	// Step 3: Setup - Commit genesis with database (for PoSV state writing)
+	t.Log("Step 3: Committing genesis to database")
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	_, block, err := core.WriteGenesisBlockWithDB(tx, db, genesis, nil, dirs, logger)
+	require.NoError(err, "Failed to write genesis block")
+	require.NotNil(block, "Genesis block should not be nil")
+	require.Equal(uint64(0), block.NumberU64(), "Genesis should be block 0")
+
+	err = tx.Commit()
+	require.NoError(err, "Failed to commit genesis transaction")
+
+	// Step 4: Setup - Create read-only transaction and state reader
+	t.Log("Step 4: Creating state reader for block 0")
+	roTx, err := db.BeginTemporalRo(context.Background())
+	require.NoError(err)
+	defer roTx.Rollback()
+
+	// Debug: Check raw account data in database for 0x68
+	addr68 := common.HexToAddress("0x0000000000000000000000000000000000000068")
+	enc, _, err := roTx.GetLatest(kv.AccountsDomain, addr68[:])
+	if err == nil && len(enc) > 0 {
+		var acc accounts.Account
+		if err := accounts.DeserialiseV3(&acc, enc); err == nil {
+			t.Logf("DEBUG: Raw account data for 0x68 from DB: balance=%s, nonce=%d, codeHash=%x", acc.Balance.Hex(), acc.Nonce, acc.CodeHash)
+		} else {
+			t.Logf("DEBUG: Failed to deserialize account data: %v", err)
+		}
+	} else {
+		t.Logf("DEBUG: Account data not found in DB for 0x68: err=%v, len=%d", err, len(enc))
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(context.Background(), roTx, 0, true, 0, nil, rawdbv3.TxNums)
+	require.NoError(err, "Failed to create state reader")
+	require.NotNil(reader, "State reader should not be nil")
+
+	stateDB := state.New(reader)
+
+	// Step 5: Test Contract 0x68 - FoundationMultiSigWallet
+	contractAddr := common.HexToAddress("0x0000000000000000000000000000000000000068")
+	t.Logf("Step 5: Testing contract 0x68 (FoundationMultiSigWallet) at %s", contractAddr.Hex())
+
+	// 5.1: Verify contract has code
+	t.Log("  5.1: Verifying contract has code")
+	code, err := stateDB.GetCode(contractAddr)
+	require.NoError(err)
+	assert.NotEmpty(code, "Contract 0x68 should have code")
+	t.Logf("      Code length: %d bytes", len(code))
+
+	// 5.2: Verify contract has expected balance
+	t.Log("  5.2: Verifying contract has expected balance")
+	balance, err := stateDB.GetBalance(contractAddr)
+	require.NoError(err)
+	expectedBalanceBig, _ := big.NewInt(0).SetString("33000000000000000000000", 10)
+	expectedBalance, _ := uint256.FromBig(expectedBalanceBig)
+	assert.Equal(expectedBalance, balance, "Contract 0x68 should have balance 33000000000000000000000")
+	t.Logf("      Balance: %s (expected: %s)", balance.Hex(), expectedBalance.Hex())
+	if balance.IsZero() {
+		t.Errorf("      ERROR: Balance is zero but should be %s", expectedBalance.Hex())
+	}
+
+	// 5.3: Verify contract has storage (owners count at slot 3)
+	t.Log("  5.3: Verifying contract has storage")
+	ownersSlot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000003")
+	storageValue := &uint256.Int{}
+	err = stateDB.GetState(contractAddr, ownersSlot, storageValue)
+	require.NoError(err)
+	assert.False(storageValue.IsZero(), "Contract 0x68 should have owners count in storage slot 3")
+	t.Logf("      Storage slot 0x03 (owners count): %s", storageValue.Hex())
+
+	t.Log("Contract 0x68 test completed")
 }
 
 // See https://github.com/erigontech/erigon/pull/11264

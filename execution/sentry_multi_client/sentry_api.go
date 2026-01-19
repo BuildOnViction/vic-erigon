@@ -168,12 +168,12 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 
 func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
 	// Get protocol from context or use default
-	fmt.Println("----> SendHeaderRequest header:", req)
+	// fmt.Println("----> SendHeaderRequest header:", req)
 
 	// If hash is zero but we have a number, try to look up the hash from database
 	hash := req.Hash
 	if hash == (common.Hash{}) && req.Number > 0 {
-		cs.logger.Info("[SendHeaderRequest] Hash is zero, looking up from database",
+		cs.logger.Debug("[SendHeaderRequest] Hash is zero, looking up from database",
 			"number", req.Number)
 
 		// Look up the hash from the database using the block number
@@ -204,7 +204,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 	}
 
-	cs.logger.Info("[SendHeaderRequest] Starting request",
+	cs.logger.Debug("[SendHeaderRequest] Starting request",
 		"number", req.Number,
 		"hash", hash.Hex(), // Use the looked-up hash
 		"originalHash", req.Hash.Hex(),
@@ -305,7 +305,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 				continue
 			}
 			messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_63
-			cs.logger.Info("[SendHeaderRequest] Encoded ETH/63 request",
+			cs.logger.Debug("[SendHeaderRequest] Encoded ETH/63 request",
 				"messageId", messageId.String(),
 				"size", len(bytes),
 				"number", req.Number,
@@ -339,7 +339,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 				continue
 			}
 			messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_66
-			cs.logger.Info("[SendHeaderRequest] Encoded ETH/66+ request",
+			cs.logger.Debug("[SendHeaderRequest] Encoded ETH/66+ request",
 				"messageId", messageId.String(),
 				"requestID", requestID,
 				"size", len(bytes),
@@ -355,7 +355,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 
 		// Log request details for debugging
-		cs.logger.Info("Sending header request",
+		cs.logger.Debug("Sending header request",
 			"protocol", protocol.String(),
 			"messageId", messageId.String(),
 			"number", req.Number,
@@ -402,10 +402,10 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		return peerID, true
 	}
 
-	cs.logger.Warn("Failed to send header request to any peer",
-		"sentryCount", len(cs.sentries),
-		"number", req.Number,
-		"hash", req.Hash.Hex())
+	// cs.logger.Warn("Failed to send header request to any peer",
+	// 	"sentryCount", len(cs.sentries),
+	// 	"number", req.Number,
+	// 	"hash", req.Hash.Hex())
 	return [64]byte{}, false
 }
 

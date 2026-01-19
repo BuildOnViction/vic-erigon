@@ -1241,6 +1241,13 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
+
+	// Debug logging for 0x68 to understand why UpdateAccountData is not being called
+	if addr == common.HexToAddress("0x0000000000000000000000000000000000000068") {
+		fmt.Printf("DEBUG updateAccount for 0x68: isDirty=%v, createdContract=%v, selfdestructed=%v, empty=%v, emptyRemoval=%v, balance=%s, nonce=%d, codeHash=%x\n",
+			isDirty, stateObject.createdContract, stateObject.selfdestructed, stateObject.empty(), emptyRemoval, stateObject.data.Balance.Hex(), stateObject.data.Nonce, stateObject.data.CodeHash)
+	}
+
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -1274,9 +1281,15 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 			fmt.Printf("%d (%d.%d) Update Account Data: %x, balance=%d, nonce=%d codehash=%x\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, &stateObject.data.Balance, stateObject.data.Nonce, stateObject.data.CodeHash)
 		}
 
+		if addr == common.HexToAddress("0x0000000000000000000000000000000000000068") {
+			fmt.Printf("DEBUG: About to call UpdateAccountData for 0x68 with balance=%s\n", stateObject.data.Balance.Hex())
+		}
 		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
+	} else if addr == common.HexToAddress("0x0000000000000000000000000000000000000068") {
+		fmt.Printf("DEBUG: NOT calling UpdateAccountData for 0x68: isDirty=%v, createdContract=%v, selfdestructed=%v, emptyRemoval=%v\n",
+			isDirty, stateObject.createdContract, stateObject.selfdestructed, emptyRemoval)
 	}
 	return nil
 }

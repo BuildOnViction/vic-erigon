@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	params2 "github.com/erigontech/erigon/params"
@@ -89,6 +90,44 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, l
 }
 
 func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	// For PoSV consensus, we need a temporal transaction to write genesis state
+	if genesis != nil && genesis.Config != nil && (genesis.Config.Consensus == chain.PosvConsensus || genesis.Config.Posv != nil) {
+		// Set up aggregator and temporal DB for PoSV
+		salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get state salt: %w", err)
+		}
+
+		agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create aggregator: %w", err)
+		}
+		defer agg.Close()
+
+		tdb, err := temporal.New(db, agg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create temporal DB: %w", err)
+		}
+		defer tdb.Close()
+
+		tx, err := tdb.BeginTemporalRw(context.Background())
+		if err != nil {
+			return nil, nil, err
+		}
+		defer tx.Rollback()
+
+		c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, dirs, logger)
+		if err != nil {
+			return c, b, err
+		}
+		err = tx.Commit()
+		if err != nil {
+			return c, b, err
+		}
+		return c, b, nil
+	}
+
+	// For non-PoSV, use regular transaction
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -119,6 +158,10 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	return WriteGenesisBlockWithDB(tx, nil, genesis, overrideOsakaTime, dirs, logger)
+}
+
+func WriteGenesisBlockWithDB(tx kv.RwTx, db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -147,7 +190,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			custom = true
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, dirs, logger)
+		block, _, err1 := write(tx, db, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -224,16 +267,244 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 }
 
 func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	return WriteGenesisStateWithDB(g, tx, nil, dirs, logger)
+}
+
+func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := GenesisToBlock(g, dirs, logger)
+	fmt.Println("-> block", block.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stateWriter := state.NewNoopWriter()
-
 	if block.Number().Sign() != 0 {
 		return nil, statedb, errors.New("can't commit genesis block with number > 0")
 	}
+
+	// For PoSV consensus, write genesis state to database
+	// Other consensus engines don't need genesis state persisted
+	if g.Config != nil && (g.Config.Consensus == chain.PosvConsensus || g.Config.Posv != nil) {
+		fmt.Println("-> Writing genesis state to database for PoSV consensus")
+		logger.Info("Writing genesis state to database for PoSV consensus")
+
+		// Get state root from computed block
+		stateRoot := block.Root()
+
+		// Check if tx is already a temporal transaction
+		var temporalTx kv.TemporalRwTx
+		createdNewTx := false
+		if tempTx, ok := tx.(kv.TemporalRwTx); ok {
+			// Already a temporal transaction, use it directly
+			temporalTx = tempTx
+		} else if db != nil {
+			// Transaction is not temporal, but we have the database - create temporal transaction
+			salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to get state salt: %w", err)
+			}
+
+			agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create aggregator: %w", err)
+			}
+			defer agg.Close()
+
+			tdb, err := temporal.New(db, agg)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create temporal DB: %w", err)
+			}
+			defer tdb.Close()
+
+			// Create a new temporal transaction
+			// Note: We need to commit the original tx first, then use the temporal one
+			// But we can't do that here. Instead, we'll use the temporal tx for state writing
+			// and the original tx for block writing
+			tempTx, err := tdb.BeginTemporalRw(context.Background())
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to begin temporal tx: %w", err)
+			}
+			defer tempTx.Rollback()
+			temporalTx = tempTx
+			createdNewTx = true
+		} else {
+			// Transaction is not temporal and we don't have the database
+			return nil, nil, fmt.Errorf("transaction must be a temporal transaction (kv.TemporalRwTx) or database must be provided to write PoSV genesis state")
+		}
+
+		sd, err := state2.NewSharedDomains(temporalTx, logger)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create shared domains: %w", err)
+		}
+		defer sd.Close()
+
+		blockNum := uint64(0)
+		txNum := uint64(1)
+
+		// Create state reader and writer
+		r := state.NewReaderV3(sd.AsGetter(temporalTx))
+		w := state.NewWriter(sd.AsPutDel(temporalTx), nil, txNum)
+		genesisStatedb := state.New(r)
+		genesisStatedb.SetTrace(false)
+
+		// Write all genesis accounts to the database
+		keys := sortedAllocKeys(g.Alloc)
+		for _, key := range keys {
+			addr := common.BytesToAddress([]byte(key))
+			account := g.Alloc[addr]
+			balance, overflow := uint256.FromBig(account.Balance)
+			fmt.Println("-> addr", addr.Hex(), "balance", balance.Hex())
+			if overflow {
+				return nil, nil, fmt.Errorf("balance overflow for address %x", addr)
+			}
+			// For accounts with code/storage, explicitly create them to ensure they are written
+			hasCodeOrStorage := len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0
+			if hasCodeOrStorage {
+				// Create account explicitly for contracts to ensure createdContract flag is set
+				if err := genesisStatedb.CreateAccount(addr, true); err != nil {
+					return nil, nil, fmt.Errorf("failed to create contract account for %x: %w", addr, err)
+				}
+			} else {
+				// For regular accounts, just get or create
+				_, err := genesisStatedb.GetOrNewStateObject(addr)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to get or create state object for %x: %w", addr, err)
+				}
+			}
+
+			// Set code first (if any)
+			if len(account.Code) > 0 {
+				genesisStatedb.SetCode(addr, account.Code)
+			}
+			if account.Nonce > 0 {
+				genesisStatedb.SetNonce(addr, account.Nonce)
+			}
+
+			// Set balance BEFORE storage and incarnation (matching MakePreState order)
+			if !balance.IsZero() {
+				if err := genesisStatedb.SetBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance); err != nil {
+					return nil, nil, fmt.Errorf("failed to set balance for %x: %w", addr, err)
+				}
+			}
+
+			// Set storage (if any)
+			for key, value := range account.Storage {
+				val := uint256.NewInt(0).SetBytes(value.Bytes())
+				genesisStatedb.SetState(addr, key, *val)
+			}
+
+			// Handle constructor (if any)
+			if len(account.Constructor) > 0 {
+				if _, err = SysCreate(addr, account.Constructor, g.Config, genesisStatedb, block.Header()); err != nil {
+					return nil, nil, fmt.Errorf("failed to create contract for %x: %w", addr, err)
+				}
+			}
+
+			// Set incarnation for contracts LAST (after balance is set)
+			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+				genesisStatedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			}
+
+			// Debug: Verify balance is still set correctly after all operations
+			if !balance.IsZero() {
+				actualBalance, err := genesisStatedb.GetBalance(addr)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to get balance for %x: %w", addr, err)
+				}
+				if actualBalance.Cmp(balance) != 0 {
+					fmt.Printf("WARNING: Balance mismatch for %x after all ops: expected %s, got %s\n", addr, balance.Hex(), actualBalance.Hex())
+				} else {
+					fmt.Printf("OK: Balance set correctly for %x: %s\n", addr, actualBalance.Hex())
+				}
+			}
+		}
+
+		// Debug: Check if account 0x68 is marked as dirty before FinalizeTx
+		addr68 := common.HexToAddress("0x0000000000000000000000000000000000000068")
+		// Access the state object directly to check its state
+		// We can't access it directly, but we can verify the balance is still set
+		balance68Before, _ := genesisStatedb.GetBalance(addr68)
+		fmt.Printf("DEBUG: Balance for 0x68 before FinalizeTx: %s\n", balance68Before.Hex())
+
+		// Finalize and commit the state
+		if err = genesisStatedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+			return nil, nil, fmt.Errorf("failed to finalize tx: %w", err)
+		}
+
+		// Debug: Check balance after FinalizeTx
+		balance68After, _ := genesisStatedb.GetBalance(addr68)
+		fmt.Printf("DEBUG: Balance for 0x68 after FinalizeTx: %s\n", balance68After.Hex())
+
+		if err = genesisStatedb.CommitBlock(&chain.Rules{}, w); err != nil {
+			return nil, nil, fmt.Errorf("failed to commit block: %w", err)
+		}
+
+		// Debug: Try to read account directly from database after commit
+		// Use SharedDomains.GetLatest instead of temporalTx.GetLatest to see writes in cache
+		if temporalTx != nil && sd != nil {
+			enc, _, err := sd.GetLatest(kv.AccountsDomain, temporalTx, addr68[:])
+			if err == nil {
+				if len(enc) > 0 {
+					var acc accounts.Account
+					if err := accounts.DeserialiseV3(&acc, enc); err == nil {
+						fmt.Printf("DEBUG: Account 0x68 in DB after CommitBlock (via SharedDomains): balance=%s, nonce=%d, codeHash=%x\n", acc.Balance.Hex(), acc.Nonce, acc.CodeHash)
+					} else {
+						fmt.Printf("DEBUG: Failed to deserialize account 0x68: %v\n", err)
+					}
+				} else {
+					fmt.Printf("DEBUG: Account 0x68 not found in DB after CommitBlock (len=0, via SharedDomains)\n")
+				}
+			} else {
+				fmt.Printf("DEBUG: Error reading account 0x68 from DB (via SharedDomains): %v\n", err)
+			}
+
+			// Also try direct temporalTx.GetLatest for comparison
+			enc2, _, err2 := temporalTx.GetLatest(kv.AccountsDomain, addr68[:])
+			if err2 == nil {
+				if len(enc2) > 0 {
+					var acc accounts.Account
+					if err := accounts.DeserialiseV3(&acc, enc2); err == nil {
+						fmt.Printf("DEBUG: Account 0x68 in DB after CommitBlock (via temporalTx): balance=%s, nonce=%d, codeHash=%x\n", acc.Balance.Hex(), acc.Nonce, acc.CodeHash)
+					}
+				} else {
+					fmt.Printf("DEBUG: Account 0x68 not found via temporalTx.GetLatest (len=0)\n")
+				}
+			}
+		}
+
+		// Flush SharedDomains to make writes visible in the database
+		// This is necessary because DomainPut writes to buffered writers that need to be flushed
+		if err = sd.FlushWithoutCommitment(context.Background(), temporalTx.(kv.RwTx)); err != nil {
+			return nil, nil, fmt.Errorf("failed to flush shared domains: %w", err)
+		}
+
+		// Compute commitment
+		rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to compute commitment: %w", err)
+		}
+
+		// Verify the root matches
+		computedRoot := common.BytesToHash(rh)
+		if computedRoot != stateRoot {
+			return nil, nil, fmt.Errorf("state root mismatch: computed %x, expected %x", computedRoot, stateRoot)
+		}
+
+		// Commit temporal transaction if we created it (not if it was passed in)
+		if createdNewTx {
+			if err = temporalTx.Commit(); err != nil {
+				return nil, nil, fmt.Errorf("failed to commit genesis tx: %w", err)
+			}
+		}
+
+		logger.Info("Genesis state written to database for PoSV",
+			"root", stateRoot.Hex(),
+			"accounts", len(g.Alloc))
+
+		return block, genesisStatedb, nil
+	}
+
+	// For non-PoSV consensus, use NoopWriter (don't persist state)
+	stateWriter := state.NewNoopWriter()
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
@@ -247,7 +518,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, dirs, logger)
+	block, _, err := write(tx, db, g, dirs, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -260,8 +531,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := WriteGenesisState(g, tx, dirs, logger)
+func write(tx kv.RwTx, db kv.RwDB, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := WriteGenesisStateWithDB(g, tx, db, dirs, logger)
 	if err != nil {
 		return block, statedb, err
 	}

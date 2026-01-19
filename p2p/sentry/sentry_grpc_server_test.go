@@ -34,6 +34,7 @@ import (
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon-p2p/forkid"
@@ -77,7 +78,8 @@ func startHandshake(
 	errChan chan *p2p.PeerError,
 ) {
 	go func() {
-		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion)
+		logger := log.New()
+		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion, logger)
 		errChan <- err
 	}()
 }

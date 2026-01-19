@@ -18,8 +18,10 @@ package posv
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
@@ -46,16 +48,19 @@ func (c *Posv) verifySeal(chainH consensus.ChainHeaderReader, header *types.Head
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
+
 		return errUnknownBlock
 	}
 
 	// Resolve the authorization key and check against signers
 	validators, err := c.backend.PosvGetValidators(c.ChainConfig.Viction, header, chain)
 	if err != nil {
+		fmt.Println("-> verifySeal", "number", number, "err", err)
 		return err
 	}
 	creator, err := ecrecover(header, c.signatures)
 	if err != nil {
+		fmt.Println("-> verifySeal", "number", number, "err", err)
 		return err
 	}
 
@@ -84,7 +89,9 @@ func (c *Posv) verifySeal(chainH consensus.ChainHeaderReader, header *types.Head
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	difficulty := c.calcDifficulty(creator, parent.Number.Uint64(), parent.Hash(), chain)
+	log.Info("-> verifySeal", "number", number, "difficulty", header.Difficulty, "difficulty", difficulty.Int64())
 	if header.Difficulty.Int64() != difficulty.Int64() {
+		c.logger.Info("-> verifySeal", "number", number, "difficulty", header.Difficulty, "difficulty", difficulty.Int64())
 		return errInvalidDifficulty
 	}
 
@@ -98,6 +105,7 @@ func (c *Posv) verifySeal(chainH consensus.ChainHeaderReader, header *types.Head
 		checkpointHeader := GetCheckpointHeader(c.config, parent, chain)
 		valAttPairs, _, err := c.backend.PosvGetCreatorAttestorPairs(c, c.ChainConfig, header, checkpointHeader)
 		if err != nil {
+			fmt.Println("-> verifySeal", "number", number, "err", err)
 			return err
 		}
 		assignedAttestor, ok := valAttPairs[creator]

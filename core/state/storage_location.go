@@ -31,6 +31,13 @@ func (s StorageLocation) Big() *big.Int {
 }
 
 func (s StorageLocation) Hash() common.Hash {
+	// CastToHash requires exactly 32 bytes
+	// Pad the slice to 32 bytes if it's shorter
+	if len(s) < 32 {
+		padded := make([]byte, 32)
+		copy(padded[32-len(s):], s)
+		return common.CastToHash(padded)
+	}
 	return common.CastToHash(s)
 }
 
