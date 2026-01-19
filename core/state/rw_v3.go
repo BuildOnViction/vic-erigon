@@ -438,10 +438,6 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 }
 
 func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	// Always log for 0x68 to debug genesis issue
-	if address == common.HexToAddress("0x0000000000000000000000000000000000000068") || w.trace {
-		fmt.Printf("Writer.UpdateAccountData: addr=%x, balance=%s, nonce=%d, inc=%d, codeHash=%x\n", address, account.Balance.Hex(), account.Nonce, account.Incarnation, account.CodeHash)
-	}
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
