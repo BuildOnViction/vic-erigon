@@ -32,6 +32,7 @@ import (
 )
 
 const (
+	ETH63 = 63
 	ETH65 = 65
 	ETH66 = 66
 	ETH67 = 67
@@ -66,6 +67,9 @@ func NewSentryClientRemote(client sentryproto.SentryClient) *SentryClientRemote 
 func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
+	if c.protocol == sentryproto.Protocol_ETH63 {
+		return 63
+	}
 	return ETH65 + uint(c.protocol)
 }
 
@@ -89,7 +93,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
+	case sentryproto.Protocol_ETH63, sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
 		c.protocol = reply.Protocol
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
@@ -126,10 +130,24 @@ type SentryClientDirect struct {
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer) *SentryClientDirect {
-	return &SentryClientDirect{protocol: sentryproto.Protocol(protocol - ETH65), server: sentryServer}
+	var proto sentryproto.Protocol
+	switch protocol {
+	case 63:
+		proto = sentryproto.Protocol_ETH63
+	default:
+		// Fallback to old calculation for unknown protocols
+		proto = sentryproto.Protocol(protocol - ETH65)
+	}
+	return &SentryClientDirect{protocol: proto, server: sentryServer}
 }
 
-func (c *SentryClientDirect) Protocol() uint    { return uint(c.protocol) + ETH65 }
+func (c *SentryClientDirect) Protocol() uint {
+	if c.protocol == sentryproto.Protocol_ETH63 {
+		return 63
+	}
+	return uint(c.protocol) + ETH65
+
+}
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
 
@@ -320,6 +338,22 @@ func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, op
 }
 
 func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filtered []sentryproto.MessageId) {
+	// If protocol is negative or not in ProtoIds, check if IDs are ETH63 range (33-42)
+	if protocol < 0 || libsentry.ProtoIds[protocol] == nil {
+		// Check if this might be ETH63 (IDs 33-42)
+		for _, id := range in {
+			if id >= 33 && id <= 42 {
+				// These are ETH63 message IDs, allow them through
+				filtered = append(filtered, id)
+			} else if _, ok := libsentry.ProtoIds[sentryproto.Protocol_ETH63][id]; ok {
+				// Also check ETH63 map explicitly
+				filtered = append(filtered, id)
+			}
+		}
+		return filtered
+	}
+
+	// Normal filtering for valid protocols
 	for _, id := range in {
 		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)

@@ -409,9 +409,13 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.NextStage()
 			continue
 		}
+
+		fmt.Println("[Sync-Run] About to execute stage:", stage.ID, "Description:", stage.Description)
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
+			fmt.Println("[Sync-Run] Stage failed:", stage.ID, "Error:", err)
 			return false, err
 		}
+		fmt.Println("[Sync-Run] Stage completed:", stage.ID)
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
@@ -449,6 +453,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	}
 
 	s.currentStage = 0
+	fmt.Println("[Sync-Download:5]Sync.Run finished", "hasMore", hasMore)
 	return hasMore, nil
 }
 

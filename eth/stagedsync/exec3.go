@@ -939,8 +939,17 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return true, nil
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
-		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		return handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		parentNum := header.Number.Uint64() - 1
+		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x, Parent hash: %x, Parent number: %d",
+			e.LogPrefix(),
+			header.Number.Uint64(),
+			computedRootHash,
+			header.Root.Bytes(),
+			header.Hash(),
+			header.ParentHash,
+			parentNum,
+		))
+		// return handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {

@@ -21,11 +21,13 @@ package types
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
@@ -164,4 +166,56 @@ func TestChainId(t *testing.T) {
 	if err != nil {
 		t.Error("expected no error")
 	}
+}
+
+func TestPreLegacyTransactionSigning(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	signer := LatestSignerForChainID(big.NewInt(1))
+	fmt.Printf("Signer type: %T\n", signer)
+	fmt.Printf("Signer: %+v\n", *signer)
+
+	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("txn", txn)
+	fmt.Println("signer", signer)
+}
+
+func TestMySignerSelection(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	number := big.NewInt(123456)
+	fmt.Println("address", addr.String())
+
+	// Custom chain config like in your genesis.json
+	testConfig := &chain.Config{
+		ChainID:        big.NewInt(1337),
+		HomesteadBlock: big.NewInt(0),
+		EIP155Block:    big.NewInt(0),
+		Clique: &chain.CliqueConfig{
+			Period: 5,
+			Epoch:  30000,
+		},
+	}
+
+	signer := MakeSigner(testConfig, number.Uint64(), 0)
+	fmt.Printf("Signer type: %T, struct: %+v\n", signer, *signer)
+
+	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("txn", txn)
+
+	sender, err := signer.Sender(txn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("recovered sender:", sender.Hex())
+	fmt.Println("matches key address:", sender == addr)
+
 }

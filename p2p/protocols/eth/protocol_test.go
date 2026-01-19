@@ -21,6 +21,7 @@ package eth
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -130,6 +131,7 @@ func TestEth66Messages(t *testing.T) {
 		Time:       6666,
 		Extra:      []byte{0x77, 0x88},
 	}
+	fmt.Println("7s62")
 	// Init the transactions, taken from a different test
 	{
 		for _, hexrlp := range []string{
@@ -228,5 +230,66 @@ func TestEth66Messages(t *testing.T) {
 		if have, _ := rlp.EncodeToBytes(tc.message); !bytes.Equal(have, tc.want) {
 			t.Errorf("test %d, type %T, have\n\t%x\nwant\n\t%x", i, tc.message, have, tc.want)
 		}
+	}
+}
+
+func TestEth63Message(t *testing.T) {
+	fmt.Println("levien")
+	st := &StatusPacket63{
+		ProtocolVersion: 63,
+		NetworkID:       1,
+		TD:              big.NewInt(123456),
+		Head:            common.HexToHash("0x01"),
+		Genesis:         common.HexToHash("0x02"),
+	}
+	b1, err := rlp.EncodeToBytes(st)
+	if err != nil {
+		t.Fatalf("encode status63: %v", err)
+	}
+	var stOut StatusPacket63
+	if err := rlp.DecodeBytes(b1, &stOut); err != nil {
+		t.Fatalf("decode status63: %v", err)
+	}
+	if stOut.ProtocolVersion != st.ProtocolVersion || stOut.NetworkID != st.NetworkID ||
+		stOut.TD.Cmp(st.TD) != 0 || stOut.Head != st.Head || stOut.Genesis != st.Genesis {
+		t.Fatalf("status63 mismatch: have %+v want %+v", stOut, st)
+	}
+
+	// GetBlockHeadersPacket encode/decode
+	req := &GetBlockHeadersPacket{
+		Origin:  HashOrNumber{Number: 100},
+		Amount:  5,
+		Skip:    0,
+		Reverse: false,
+	}
+	b2, err := rlp.EncodeToBytes(req)
+	if err != nil {
+		t.Fatalf("encode getHeaders63: %v", err)
+	}
+	var reqOut GetBlockHeadersPacket
+	if err := rlp.DecodeBytes(b2, &reqOut); err != nil {
+		t.Fatalf("decode getHeaders63: %v", err)
+	}
+	if reqOut.Origin.Number != req.Origin.Number || reqOut.Amount != req.Amount ||
+		reqOut.Skip != req.Skip || reqOut.Reverse != req.Reverse {
+		t.Fatalf("getHeaders63 mismatch: have %+v want %+v", reqOut, req)
+	}
+
+	// NewBlockHashesPacket encode/decode
+	nbh := NewBlockHashesPacket{
+		{Hash: common.HexToHash("0xdeadbeef"), Number: 101},
+		{Hash: common.HexToHash("0xfeedcafe"), Number: 102},
+	}
+	b3, err := rlp.EncodeToBytes(nbh)
+	if err != nil {
+		t.Fatalf("encode newBlockHashes63: %v", err)
+	}
+	var nbhOut NewBlockHashesPacket
+	if err := rlp.DecodeBytes(b3, &nbhOut); err != nil {
+		t.Fatalf("decode newBlockHashes63: %v", err)
+	}
+	if len(nbhOut) != 2 || nbhOut[0].Hash != nbh[0].Hash || nbhOut[0].Number != nbh[0].Number ||
+		nbhOut[1].Hash != nbh[1].Hash || nbhOut[1].Number != nbh[1].Number {
+		t.Fatalf("newBlockHashes63 mismatch: have %+v want %+v", nbhOut, nbh)
 	}
 }

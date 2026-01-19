@@ -62,6 +62,9 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 
 // RequestMoreBodies - returns nil if nothing to request
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
+	// [logs]
+	// fmt.Println("[RequestMoreBodies] START - RequestMoreBodies called")
+	// fmt.Println("RequestMoreBodies: starting", "requestedLow", bd.requestedLow, "maxProgress", bd.maxProgress, "blockBufferSize", bd.blockBufferSize)
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, bd.blockBufferSize)
 	hashes := make([]common.Hash, 0, bd.blockBufferSize)
@@ -69,16 +72,19 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	for blockNum := bd.requestedLow; len(blockNums) < bd.blockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
+			// fmt.Println("RequestMoreBodies: block already delivered", "blockNum", blockNum)
 			continue
 		}
 
 		if req, ok := bd.requests[blockNum]; ok {
 			if currentTime < req.waitUntil {
+				// fmt.Println("RequestMoreBodies: request still waiting", "blockNum", blockNum, "waitUntil", req.waitUntil, "currentTime", currentTime)
 				continue
 			}
 			bd.peerMap[req.peerID]++
 			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyExpired)
 			delete(bd.requests, blockNum)
+			// fmt.Println("RequestMoreBodies: expired request removed", "blockNum", blockNum)
 		}
 
 		// check in the bucket if that has been received either in this run or a previous one.
@@ -87,6 +93,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		var err error
 		if _, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.delivered.Add(blockNum)
+			// fmt.Println("RequestMoreBodies: block found in cache", "blockNum", blockNum)
 			continue
 		}
 

@@ -194,6 +194,7 @@ Loop:
 	for !stopped {
 
 		transitionedToPoS, err := rawdb.Transitioned(tx, startProgress, cfg.chainConfig.TerminalTotalDifficulty)
+		// fmt.Println("[HeadersPOW] START - transitionedToPoS", transitionedToPoS)
 		if err != nil {
 			return err
 		}
@@ -207,14 +208,35 @@ Loop:
 
 		sentToPeer = false
 		currentTime := time.Now()
+		logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders: calling", logPrefix), "currentTime", currentTime)
+
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
+			logger.Info(fmt.Sprintf("[%s] RequestMoreHeaders returned request", logPrefix),
+				"number", req.Number,
+				"hash", req.Hash.Hex(),
+				"anchorHeight", req.Number+1,
+				"length", req.Length,
+				"skip", req.Skip,
+				"reverse", req.Reverse,
+				"hashIsZero", req.Hash == (common.Hash{}))
+
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				logger.Debug(fmt.Sprintf("[%s] Requested header", logPrefix), "from", req.Number, "length", req.Length)
+				logger.Info(fmt.Sprintf("[%s] Requested header", logPrefix),
+					"from", req.Number,
+					"length", req.Length,
+					"peer", fmt.Sprintf("%x", peer[:8]))
 				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
 				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
+			} else {
+				logger.Warn(fmt.Sprintf("[%s] RequestMoreHeaders: request not sent to peer", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex())
 			}
+		} else {
+			logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders returned nil", logPrefix),
+				"penalties", len(penalties))
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -223,6 +245,10 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
+				logger.Debug(fmt.Sprintf("[%s] RequestMoreHeaders: additional request", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"remainingRequests", maxRequests)
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -237,28 +263,60 @@ Loop:
 
 		// Send skeleton request if required
 		if time.Since(lastSkeletonTime) > 1*time.Second {
+			// Sync highestInDb with actual database progress before requesting skeleton
+			if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+				return err
+			}
+			actualProgress := cfg.hd.Progress()
+			logger.Info(fmt.Sprintf("[%s] Progress check", logPrefix), "progress", actualProgress)
+
+			logger.Info(fmt.Sprintf("[%s] RequestSkeleton: calling", logPrefix))
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
+				logger.Info(fmt.Sprintf("[%s] RequestSkeleton returned request", logPrefix),
+					"number", req.Number,
+					"hash", req.Hash.Hex(),
+					"length", req.Length,
+					"skip", req.Skip,
+					"hashIsZero", req.Hash == (common.Hash{}))
+
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					logger.Debug(fmt.Sprintf("[%s] Requested skeleton", logPrefix), "from", req.Number, "length", req.Length)
+					logger.Info(fmt.Sprintf("[%s] Requested skeleton", logPrefix),
+						"from", req.Number,
+						"length", req.Length,
+						"peer", fmt.Sprintf("%x", peer[:8]))
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
+				} else {
+					logger.Warn(fmt.Sprintf("[%s] RequestSkeleton: request not sent to peer", logPrefix),
+						"number", req.Number,
+						"hash", req.Hash.Hex())
 				}
+			} else {
+				logger.Debug(fmt.Sprintf("[%s] RequestSkeleton returned nil", logPrefix))
 			}
 		}
+		// fmt.Println("[HeadersPOW] START - InsertHeaders")
 		// Load headers into the database
+		// fmt.Println("[HeadersPOW] Calling InsertHeaders")
+		// fmt.Println("[HeadersPOW] Header downloader progress before InsertHeaders:", cfg.hd.Progress())
 		inSync, err := cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.syncConfig.LoopBlockLimit, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix()))
 
 		if err != nil {
+			// fmt.Println("[HeadersPOW] InsertHeaders error:", err)
 			return err
 		}
+		// fmt.Println("[HeadersPOW] InsertHeaders completed", "inSync", inSync, "bestHeaderChanged", headerInserter.BestHeaderChanged())
+		// fmt.Println("[HeadersPOW] Header downloader progress after InsertHeaders:", cfg.hd.Progress())
 
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
+			// fmt.Println("[HeadersPOW] START - InsertHeaders BestHeaderChanged", headerInserter.BestHeaderChanged())
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
+				// fmt.Println("[HeadersPOW] START - InsertHeaders inSync", inSync)
 				break
 			}
 		}
