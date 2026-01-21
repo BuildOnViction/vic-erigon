@@ -91,7 +91,9 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, l
 
 func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	// For PoSV consensus, we need a temporal transaction to write genesis state
-	if genesis != nil && genesis.Config != nil && (genesis.Config.Consensus == chain.PosvConsensus || genesis.Config.Posv != nil) {
+	isPosv := genesis != nil && genesis.Config != nil && (genesis.Config.Consensus == chain.PosvConsensus || genesis.Config.Posv != nil)
+	logger.Info("CommitGenesisBlockWithOverride", "genesis_nil", genesis == nil, "config_nil", genesis != nil && genesis.Config == nil, "is_posv", isPosv)
+	if isPosv {
 		// Set up aggregator and temporal DB for PoSV
 		salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
 		if err != nil {
@@ -102,13 +104,16 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create aggregator: %w", err)
 		}
-		defer agg.Close()
+		// Note: We don't close the aggregator here because it's used by the temporal DB
+		// and the node will manage its lifecycle. The aggregator is a long-lived component.
 
 		tdb, err := temporal.New(db, agg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create temporal DB: %w", err)
 		}
-		defer tdb.Close()
+		// Note: We don't close the temporal DB wrapper here because tdb.Close() would
+		// close the underlying database (db), which is still needed by the node.
+		// The temporal DB is just a wrapper and doesn't need to be closed separately.
 
 		tx, err := tdb.BeginTemporalRw(context.Background())
 		if err != nil {
@@ -116,7 +121,15 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		}
 		defer tx.Rollback()
 
-		c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, dirs, logger)
+		// Debug: verify we got a temporal transaction
+		logger.Info("Created temporal transaction for PoSV genesis", "tx_type", fmt.Sprintf("%T", tx))
+		if _, ok := tx.(kv.TemporalRwTx); !ok {
+			return nil, nil, fmt.Errorf("BeginTemporalRw returned non-temporal transaction: %T", tx)
+		}
+
+		// Pass db so WriteGenesisStateWithDB knows we already have a temporal transaction
+		// and doesn't try to create a new one
+		c, b, err := WriteGenesisBlockWithDB(tx, db, genesis, overrideOsakaTime, dirs, logger)
 		if err != nil {
 			return c, b, err
 		}
@@ -124,6 +137,11 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		if err != nil {
 			return c, b, err
 		}
+
+		// Note: We don't close tdb and agg here because they're just wrappers.
+		// The underlying database (db) remains open for the node to use.
+		// The defer statements will clean them up when the function returns,
+		// but they shouldn't affect the underlying database connection.
 		return c, b, nil
 	}
 
@@ -162,6 +180,22 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 }
 
 func WriteGenesisBlockWithDB(tx kv.RwTx, db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	// Check if this is PoSV and we need special handling
+	isPosv := genesis != nil && genesis.Config != nil && (genesis.Config.Consensus == chain.PosvConsensus || genesis.Config.Posv != nil)
+
+	// For PoSV, if we have db but tx is not temporal, we need to handle it specially
+	// because we can't create a new write transaction while one is open
+	if isPosv && db != nil {
+		if _, ok := tx.(kv.TemporalRwTx); !ok {
+			// We're in a regular transaction but need temporal for PoSV
+			// This happens when called from eth/backend.go's Update() callback
+			// We need to commit this transaction first, then use CommitGenesisBlockWithOverride
+			// But we can't commit from here. Instead, we should return an error indicating
+			// that PoSV genesis should use CommitGenesisBlockWithOverride directly
+			return nil, nil, fmt.Errorf("PoSV genesis cannot be written from within a regular transaction. Use CommitGenesisBlockWithOverride instead of WriteGenesisBlockWithDB for PoSV genesis")
+		}
+	}
+
 	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -294,51 +328,21 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 		// Check if tx is already a temporal transaction
 		var temporalTx kv.TemporalRwTx
 		createdNewTx := false
+
+		// Debug: log the actual type we received
+		logger.Info("Checking transaction type for PoSV genesis", "tx_type", fmt.Sprintf("%T", tx))
+
 		if tempTx, ok := tx.(kv.TemporalRwTx); ok {
 			// Already a temporal transaction, use it directly
 			temporalTx = tempTx
-			logger.Info("Using existing temporal transaction")
-		} else if db != nil {
-			logger.Info("Creating new temporal transaction for PoSV genesis")
-			// Transaction is not temporal, but we have the database - create temporal transaction
-			salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to get state salt: %w", err)
-			}
-			logger.Info("State salt obtained")
-
-			logger.Info("Creating aggregator")
-			agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to create aggregator: %w", err)
-			}
-			defer agg.Close()
-			logger.Info("Aggregator created")
-
-			logger.Info("Creating temporal DB")
-			tdb, err := temporal.New(db, agg)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to create temporal DB: %w", err)
-			}
-			defer tdb.Close()
-			logger.Info("Temporal DB created")
-
-			// Create a new temporal transaction
-			// Note: We need to commit the original tx first, then use the temporal one
-			// But we can't do that here. Instead, we'll use the temporal tx for state writing
-			// and the original tx for block writing
-			logger.Info("Beginning temporal transaction")
-			tempTx, err := tdb.BeginTemporalRw(context.Background())
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to begin temporal tx: %w", err)
-			}
-			defer tempTx.Rollback()
-			temporalTx = tempTx
-			createdNewTx = true
-			logger.Info("Temporal transaction created")
+			logger.Info("Using existing temporal transaction", "temporal_tx_type", fmt.Sprintf("%T", temporalTx))
 		} else {
-			// Transaction is not temporal and we don't have the database
-			return nil, nil, fmt.Errorf("transaction must be a temporal transaction (kv.TemporalRwTx) or database must be provided to write PoSV genesis state")
+			// Transaction is not temporal - we cannot create a new write transaction
+			// while one is already open (MDBX limitation). We must have a temporal transaction
+			// passed in for PoSV genesis.
+			// This error indicates that CommitGenesisBlockWithOverride did not create a temporal transaction
+			// as expected, or the transaction was unwrapped somewhere in the call chain.
+			return nil, nil, fmt.Errorf("transaction must be a temporal transaction (kv.TemporalRwTx) for PoSV genesis state. Got type: %T. This suggests the transaction from CommitGenesisBlockWithOverride was not properly created as a temporal transaction.", tx)
 		}
 
 		logger.Info("Creating SharedDomains for genesis state")
@@ -542,6 +546,16 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 }
 
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
+	// For PoSV, use CommitGenesisBlockWithOverride which handles temporal transactions
+	if g != nil && g.Config != nil && (g.Config.Consensus == chain.PosvConsensus || g.Config.Posv != nil) {
+		_, block, err := CommitGenesisBlockWithOverride(db, g, nil, dirs, logger)
+		if err != nil {
+			panic(err)
+		}
+		return block
+	}
+
+	// For non-PoSV, use regular transaction
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
@@ -561,6 +575,17 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func write(tx kv.RwTx, db kv.RwDB, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	// For PoSV, we need a temporal transaction. If we don't have one, we need to check
+	// if the transaction is already temporal, or if we need to error out.
+	if g != nil && g.Config != nil && (g.Config.Consensus == chain.PosvConsensus || g.Config.Posv != nil) {
+		// Check if we already have a temporal transaction
+		if _, ok := tx.(kv.TemporalRwTx); !ok {
+			// We don't have a temporal transaction, but we need one for PoSV
+			// This should not happen if CommitGenesisBlockWithOverride is used correctly
+			return nil, nil, fmt.Errorf("PoSV genesis requires a temporal transaction, but got type: %T. Use CommitGenesisBlockWithOverride for PoSV genesis.", tx)
+		}
+	}
+
 	block, statedb, err := WriteGenesisStateWithDB(g, tx, db, dirs, logger)
 	if err != nil {
 		return block, statedb, err

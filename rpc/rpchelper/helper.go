@@ -31,7 +31,6 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
@@ -153,18 +152,11 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 		return nil, err
 	}
 
-	log.Info("[CreateStateReader] Creating state reader",
-		"block", blockNumber,
-		"latest", latest,
-		"txnIndex", txnIndex)
-
 	reader, err := CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 	if err != nil {
-		log.Error("[CreateStateReader] Failed", "err", err, "block", blockNumber)
 		return nil, err
 	}
 
-	log.Info("[CreateStateReader] State reader created", "type", fmt.Sprintf("%T", reader), "block", blockNumber)
 	return reader, nil
 }
 
@@ -334,43 +326,26 @@ func (r *genesisStateReader) ReadAccountStorage(address common.Address, key comm
 
 // Update CreateStateReaderFromBlockNumber
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	// For block 0 (genesis), create a reader that falls back to genesis alloc
-	if blockNumber == 0 {
-		log.Info("[CreateStateReaderFromBlockNumber] Block 0 detected, creating genesis-aware state reader")
+	// // For block 0 (genesis), create a reader that falls back to genesis alloc
+	// if blockNumber == 0 {
+	// 	// Read genesis alloc from database
+	// 	genesis, err := core.ReadGenesis(tx)
+	// 	if err != nil {
+	// 		return state.NewReaderV3(tx), nil
+	// 	}
+	// 	if genesis == nil || genesis.Alloc == nil {
+	// 		return state.NewReaderV3(tx), nil
+	// 	}
 
-		// Read genesis alloc from database
-		genesis, err := core.ReadGenesis(tx)
-		if err != nil {
-			log.Warn("[CreateStateReaderFromBlockNumber] Failed to read genesis, falling back to ReaderV3", "err", err)
-			return state.NewReaderV3(tx), nil
-		}
-		if genesis == nil || genesis.Alloc == nil {
-			log.Warn("[CreateStateReaderFromBlockNumber] Genesis alloc not found, falling back to ReaderV3")
-			return state.NewReaderV3(tx), nil
-		}
+	// 	// Create genesis-aware reader
+	// 	baseReader := state.NewReaderV3(tx)
+	// 	reader := &genesisStateReader{
+	// 		StateReader:  baseReader,
+	// 		genesisAlloc: genesis.Alloc,
+	// 	}
 
-		// Test if genesis state is accessible
-		testAddr := common.HexToAddress("0x0000000000000000000000000000000000000088")
-		testCode, _, err := tx.GetLatest(kv.CodeDomain, testAddr[:])
-		if err != nil {
-			log.Warn("[CreateStateReaderFromBlockNumber] Failed to test genesis state", "err", err)
-		} else if len(testCode) == 0 {
-			log.Info("[CreateStateReaderFromBlockNumber] Genesis state not in database, will use genesis alloc fallback",
-				"allocCount", len(genesis.Alloc))
-		} else {
-			log.Info("[CreateStateReaderFromBlockNumber] Genesis state found in database", "codeLen", len(testCode))
-		}
-
-		// Create genesis-aware reader
-		baseReader := state.NewReaderV3(tx)
-		reader := &genesisStateReader{
-			StateReader:  baseReader,
-			genesisAlloc: genesis.Alloc,
-		}
-
-		log.Info("[CreateStateReaderFromBlockNumber] Genesis state reader created", "type", fmt.Sprintf("%T", reader))
-		return reader, nil
-	}
+	// 	return reader, nil
+	// }
 
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)

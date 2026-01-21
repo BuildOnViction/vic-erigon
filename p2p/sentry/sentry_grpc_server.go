@@ -510,7 +510,7 @@ func runPeer(
 			fmt.Printf("-> Calling send() for GET_BLOCK_HEADERS (msgID=%s, bytes=%d)\n", msgID.String(), len(b))
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
-			fmt.Printf("-> Received BLOCK_HEADERS message from peer %x\n", peerID[:8])
+			// fmt.Printf("-> Received BLOCK_HEADERS message from peer %x\n", peerID[:8])
 			// For ETH/63, remap to standard message ID so client understands
 			var msgID proto_sentry.MessageId
 			if protocol == 63 {
@@ -534,18 +534,18 @@ func runPeer(
 			// Decode and log BLOCK_HEADERS message
 			if protocol == 63 {
 				// ETH/63: BlockHeadersPacket (no request ID)
-				var headers eth.BlockHeadersPacket
-				if err := rlp.DecodeBytes(b, &headers); err == nil {
-					fmt.Printf("--> Decoded BLOCK_HEADERS (ETH/63) count=%d bytes=%d\n", len(headers), len(b))
-					// Log first 3 headers
-					for i := 0; i < len(headers) && i < 3; i++ {
-						h := headers[i]
-						fmt.Printf("   [%d] num=%d hash=%x parent=%x time=%d gasLimit=%d gasUsed=%d miner=%x difficulty=%d\n",
-							i, h.Number.Uint64(), h.Hash(), h.ParentHash, h.Time, h.GasLimit, h.GasUsed, h.Coinbase, h.Difficulty.Int64())
-					}
-				} else {
-					fmt.Printf("--> BLOCK_HEADERS (ETH/63) decode error: %v\n", err)
-				}
+				// var headers eth.BlockHeadersPacket
+				// if err := rlp.DecodeBytes(b, &headers); err == nil {
+				// 	fmt.Printf("--> Decoded BLOCK_HEADERS (ETH/63) count=%d bytes=%d\n", len(headers), len(b))
+				// 	// Log first 3 headers
+				// 	for i := 0; i < len(headers) && i < 3; i++ {
+				// 		h := headers[i]
+				// 		fmt.Printf("   [%d] num=%d hash=%x parent=%x time=%d gasLimit=%d gasUsed=%d miner=%x difficulty=%d\n",
+				// 			i, h.Number.Uint64(), h.Hash(), h.ParentHash, h.Time, h.GasLimit, h.GasUsed, h.Coinbase, h.Difficulty.Int64())
+				// 	}
+				// } else {
+				// 	fmt.Printf("--> BLOCK_HEADERS (ETH/63) decode error: %v\n", err)
+				// }
 			} else {
 				// ETH/66+: BlockHeadersPacket66 (with request ID)
 				var headers eth.BlockHeadersPacket66

@@ -90,56 +90,39 @@ var vicValidatorStorageMap = map[string]*big.Int{
 
 // Return all addressed that are proposed as validators.
 func (sdb *IntraBlockState) VicGetCandidates(contractAddress common.Address) []common.Address {
-	fmt.Println("-> VicGetCandidates START", "contractAddress", contractAddress.Hex())
-
 	// Get the candidates slot bytes
 	candidatesSlotBytes := vicValidatorStorageMap["candidates"].Bytes()
-	fmt.Println("-> VicGetCandidates", "candidatesSlotBytes", fmt.Sprintf("%x", candidatesSlotBytes), "len", len(candidatesSlotBytes))
-
 	candidatesSlot := StorageLocation(candidatesSlotBytes)
-	fmt.Println("-> VicGetCandidates", "candidatesSlot", fmt.Sprintf("%x", candidatesSlot), "len", len(candidatesSlot))
-
-	// Try to convert to hash - this is where the error occurs
-	fmt.Println("-> VicGetCandidates", "attempting Hash() conversion...")
 	candidatesSlotHash := candidatesSlot.Hash()
-	fmt.Println("-> VicGetCandidates", "candidatesSlotHash", candidatesSlotHash.Hex())
 
 	candidatesStateData, err := sdb.GetState2(contractAddress, candidatesSlotHash)
 	if err != nil {
-		fmt.Println("-> VicGetCandidates", "GetState2 error", err)
 		return []common.Address{}
 	}
-	fmt.Println("-> VicGetCandidates", "candidatesStateData", candidatesStateData.Uint64(), "candidateCount", candidatesStateData.Uint64())
 
 	candidates := []common.Address{}
 	candidateCount := candidatesStateData.Uint64()
-	fmt.Println("-> VicGetCandidates", "looping through candidates", "count", candidateCount)
 
 	for i := uint64(0); i <= candidateCount; i++ {
-		fmt.Println("-> VicGetCandidates", "loop iteration", i, "/", candidateCount)
-
 		candidateSlot := StorageLocationOfDynamicArrayElement(candidatesSlot, i, 160)
-		fmt.Println("-> VicGetCandidates", "candidateSlot", fmt.Sprintf("%x", candidateSlot), "len", len(candidateSlot))
-
 		candidateSlotHash := candidateSlot.Hash()
-		fmt.Println("-> VicGetCandidates", "candidateSlotHash", candidateSlotHash.Hex())
 
 		candidateStateData, err := sdb.GetState2(contractAddress, candidateSlotHash)
 		if err != nil {
-			fmt.Println("-> VicGetCandidates", "GetState2 error for candidate", i, "err", err)
 			continue
 		}
-		fmt.Println("-> VicGetCandidates", "candidateStateData", fmt.Sprintf("%x", candidateStateData.Bytes()))
 
 		candidate := common.BytesToAddress(candidateStateData.Bytes())
-		fmt.Println("-> VicGetCandidates", "candidate", i, candidate.Hex())
 		candidates = append(candidates, candidate)
 	}
 
-	fmt.Println("-> VicGetCandidates END", "found", len(candidates), "candidates")
+	// Log candidates as a simple list
+	candidateList := make([]string, len(candidates))
 	for i, candidate := range candidates {
-		fmt.Println("-> VicGetCandidates", "candidate", i, candidate.Hex())
+		candidateList[i] = candidate.Hex()
 	}
+	fmt.Println("VicGetCandidates candidates ->", candidateList)
+
 	return candidates
 }
 
