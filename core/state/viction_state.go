@@ -169,7 +169,7 @@ func (sdb *IntraBlockState) VicGetValidatorVoterCap(contractAddress common.Addre
 
 // Alternative version of GetState that returns uint256.Int as result instead of modifying input parameter.
 func (sdb *IntraBlockState) GetState2(contractAddress common.Address, storLoc common.Hash) (*uint256.Int, error) {
-	var stateData *uint256.Int
-	err := sdb.GetState(contractAddress, storLoc, stateData)
-	return stateData, err
+	var stateData uint256.Int
+	err := sdb.GetState(contractAddress, storLoc, &stateData)
+	return &stateData, err
 }

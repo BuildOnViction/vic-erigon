@@ -160,27 +160,66 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	return reader, nil
 }
 
-func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	if latest {
-		cacheView, err := stateCache.View(ctx, tx)
-		if err != nil {
-			return nil, err
-		}
-		return CreateLatestCachedStateReader(cacheView, tx), nil
-	}
-	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, txNumsReader)
-}
+// func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+// 	// For block 0 (genesis), try using ReaderV3 which reads from latest state
+// 	// Genesis state should be in the latest state since it's the base state
+// 	if blockNumber == 0 {
+// 		log.Info("[CreateStateReaderFromBlockNumber] Block 0 detected, using ReaderV3 for genesis state")
+// 		// ReaderV3 reads from latest state, which should include genesis
+// 		reader := state.NewReaderV3(tx)
 
-func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+// 		// Test if genesis state is accessible by trying to read a known contract
+// 		testAddr := common.HexToAddress("0x0000000000000000000000000000000000000088")
+// 		testCode, _, err := tx.GetLatest(kv.CodeDomain, testAddr[:])
+// 		if err != nil {
+// 			log.Warn("[CreateStateReaderFromBlockNumber] Failed to test genesis state", "err", err)
+// 		} else if len(testCode) == 0 {
+// 			log.Warn("[CreateStateReaderFromBlockNumber] Genesis state not found in database - contract code is empty",
+// 				"addr", testAddr.Hex(),
+// 				"codeLen", len(testCode))
+// 		} else {
+// 			log.Info("[CreateStateReaderFromBlockNumber] Genesis state found in database",
+// 				"addr", testAddr.Hex(),
+// 				"codeLen", len(testCode))
+// 		}
+
+// 		log.Info("[CreateStateReaderFromBlockNumber] Genesis state reader created", "type", fmt.Sprintf("%T", reader))
+// 		return reader, nil
+// 	}
+
+// 	if latest {
+// 		cacheView, err := stateCache.View(ctx, tx)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		return CreateLatestCachedStateReader(cacheView, tx), nil
+// 	}
+// 	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, txNumsReader)
+// }
+
+func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64,
+	txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
 	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
+		log.Error("[CreateHistoryStateReader] Failed to get minTxNum", "err", err, "block", blockNumber)
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+
+	log.Info("[CreateHistoryStateReader] History state reader",
+		"block", blockNumber,
+		"minTxNum", minTxNum,
+		"txNum", txNum,
+		"stateHistoryStartFrom", r.StateHistoryStartFrom())
+
 	if txNum < r.StateHistoryStartFrom() {
+		log.Warn("[CreateHistoryStateReader] State pruned",
+			"txNum", txNum,
+			"stateHistoryStartFrom", r.StateHistoryStartFrom(),
+			"block", blockNumber)
 		return r, state.PrunedError
 	}
 	r.SetTxNum(txNum)

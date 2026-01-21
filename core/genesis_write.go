@@ -224,7 +224,7 @@ func WriteGenesisBlockWithDB(tx kv.RwTx, db kv.RwDB, genesis *types.Genesis, ove
 			custom = true
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, dirs, logger)
+		block, _, err1 := write(tx, db, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -301,12 +301,15 @@ func WriteGenesisBlockWithDB(tx kv.RwTx, db kv.RwDB, genesis *types.Genesis, ove
 }
 
 func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	return WriteGenesisStateWithDB(g, tx, nil, dirs, logger)
+}
+
+func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := GenesisToBlock(g, dirs, logger)
+	fmt.Println("-> block", block.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
-
-	stateWriter := state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, errors.New("can't commit genesis block with number > 0")
@@ -558,7 +561,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, dirs, logger)
+	block, _, err := write(tx, db, g, dirs, logger)
 	if err != nil {
 		panic(err)
 	}
