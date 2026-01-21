@@ -289,6 +289,7 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 
 		// Get state root from computed block
 		stateRoot := block.Root()
+		logger.Info("Genesis state root", "root", stateRoot.Hex(), "total_accounts", len(g.Alloc))
 
 		// Check if tx is already a temporal transaction
 		var temporalTx kv.TemporalRwTx
@@ -296,29 +297,37 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 		if tempTx, ok := tx.(kv.TemporalRwTx); ok {
 			// Already a temporal transaction, use it directly
 			temporalTx = tempTx
+			logger.Info("Using existing temporal transaction")
 		} else if db != nil {
+			logger.Info("Creating new temporal transaction for PoSV genesis")
 			// Transaction is not temporal, but we have the database - create temporal transaction
 			salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to get state salt: %w", err)
 			}
+			logger.Info("State salt obtained")
 
+			logger.Info("Creating aggregator")
 			agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to create aggregator: %w", err)
 			}
 			defer agg.Close()
+			logger.Info("Aggregator created")
 
+			logger.Info("Creating temporal DB")
 			tdb, err := temporal.New(db, agg)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to create temporal DB: %w", err)
 			}
 			defer tdb.Close()
+			logger.Info("Temporal DB created")
 
 			// Create a new temporal transaction
 			// Note: We need to commit the original tx first, then use the temporal one
 			// But we can't do that here. Instead, we'll use the temporal tx for state writing
 			// and the original tx for block writing
+			logger.Info("Beginning temporal transaction")
 			tempTx, err := tdb.BeginTemporalRw(context.Background())
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to begin temporal tx: %w", err)
@@ -326,29 +335,38 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 			defer tempTx.Rollback()
 			temporalTx = tempTx
 			createdNewTx = true
+			logger.Info("Temporal transaction created")
 		} else {
 			// Transaction is not temporal and we don't have the database
 			return nil, nil, fmt.Errorf("transaction must be a temporal transaction (kv.TemporalRwTx) or database must be provided to write PoSV genesis state")
 		}
 
+		logger.Info("Creating SharedDomains for genesis state")
 		sd, err := state2.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create shared domains: %w", err)
 		}
 		defer sd.Close()
+		logger.Info("SharedDomains created")
 
 		blockNum := uint64(0)
 		txNum := uint64(1)
 
 		// Create state reader and writer
+		logger.Info("Creating state reader and writer")
 		r := state.NewReaderV3(sd.AsGetter(temporalTx))
 		w := state.NewWriter(sd.AsPutDel(temporalTx), nil, txNum)
 		genesisStatedb := state.New(r)
 		genesisStatedb.SetTrace(false)
+		logger.Info("State reader and writer created")
 
 		// Write all genesis accounts to the database
 		keys := sortedAllocKeys(g.Alloc)
-		for _, key := range keys {
+		logger.Info("Starting to write genesis accounts", "total", len(keys))
+		for i, key := range keys {
+			if i%100 == 0 && i > 0 {
+				logger.Info("Writing genesis accounts", "progress", fmt.Sprintf("%d/%d", i, len(keys)))
+			}
 			addr := common.BytesToAddress([]byte(key))
 			account := g.Alloc[addr]
 			balance, overflow := uint256.FromBig(account.Balance)
@@ -417,6 +435,7 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 				}
 			}
 		}
+		logger.Info("Finished writing all genesis accounts", "total", len(keys))
 
 		// Debug: Check if account 0x68 is marked as dirty before FinalizeTx
 		addr68 := common.HexToAddress("0x0000000000000000000000000000000000000068")
@@ -426,17 +445,21 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 		fmt.Printf("DEBUG: Balance for 0x68 before FinalizeTx: %s\n", balance68Before.Hex())
 
 		// Finalize and commit the state
+		logger.Info("Finalizing transaction")
 		if err = genesisStatedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return nil, nil, fmt.Errorf("failed to finalize tx: %w", err)
 		}
+		logger.Info("Transaction finalized")
 
 		// Debug: Check balance after FinalizeTx
 		balance68After, _ := genesisStatedb.GetBalance(addr68)
 		fmt.Printf("DEBUG: Balance for 0x68 after FinalizeTx: %s\n", balance68After.Hex())
 
+		logger.Info("Committing block")
 		if err = genesisStatedb.CommitBlock(&chain.Rules{}, w); err != nil {
 			return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 		}
+		logger.Info("Block committed")
 
 		// Debug: Try to read account directly from database after commit
 		// Use SharedDomains.GetLatest instead of temporalTx.GetLatest to see writes in cache
@@ -473,15 +496,19 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 
 		// Flush SharedDomains to make writes visible in the database
 		// This is necessary because DomainPut writes to buffered writers that need to be flushed
+		logger.Info("Flushing shared domains")
 		if err = sd.FlushWithoutCommitment(context.Background(), temporalTx.(kv.RwTx)); err != nil {
 			return nil, nil, fmt.Errorf("failed to flush shared domains: %w", err)
 		}
+		logger.Info("Shared domains flushed")
 
 		// Compute commitment
+		logger.Info("Computing commitment (this may take a while for large genesis states)", "accounts", len(keys))
 		rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to compute commitment: %w", err)
 		}
+		logger.Info("Commitment computed", "root", common.BytesToHash(rh).Hex())
 
 		// Verify the root matches
 		computedRoot := common.BytesToHash(rh)
@@ -491,9 +518,11 @@ func WriteGenesisStateWithDB(g *types.Genesis, tx kv.RwTx, db kv.RwDB, dirs data
 
 		// Commit temporal transaction if we created it (not if it was passed in)
 		if createdNewTx {
+			logger.Info("Committing temporal transaction")
 			if err = temporalTx.Commit(); err != nil {
 				return nil, nil, fmt.Errorf("failed to commit genesis tx: %w", err)
 			}
+			logger.Info("Temporal transaction committed")
 		}
 
 		logger.Info("Genesis state written to database for PoSV",

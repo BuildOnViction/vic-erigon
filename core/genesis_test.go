@@ -271,9 +271,14 @@ func TestPoSVGenesisState(t *testing.T) {
 	t.Log("  5.2: Verifying contract has expected balance")
 	balance, err := stateDB.GetBalance(contractAddr)
 	require.NoError(err)
-	expectedBalanceBig, _ := big.NewInt(0).SetString("33000000000000000000000", 10)
+	// Balance from genesis file: 0xd3c21bcecceda10000000 = 16000000000000000000000000
+	expectedBalanceBig, _ := big.NewInt(0).SetString("16000000000000000000000000", 10)
 	expectedBalance, _ := uint256.FromBig(expectedBalanceBig)
-	assert.Equal(expectedBalance, balance, "Contract 0x68 should have balance 33000000000000000000000")
+	// Use Cmp() for proper comparison since balance is a value and expectedBalance is a pointer
+	if balance.Cmp(expectedBalance) != 0 {
+		t.Errorf("Contract 0x68 should have balance %s, but got %s", expectedBalance.Hex(), balance.Hex())
+	}
+	assert.Equal(0, balance.Cmp(expectedBalance), "Contract 0x68 should have balance 16000000000000000000000000 (0xd3c21bcecceda10000000)")
 	t.Logf("      Balance: %s (expected: %s)", balance.Hex(), expectedBalance.Hex())
 	if balance.IsZero() {
 		t.Errorf("      ERROR: Balance is zero but should be %s", expectedBalance.Hex())
