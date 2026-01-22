@@ -384,6 +384,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// For custom network ID 1337, always use custom genesis
 			if config.NetworkID == 1337 {
 				genesisSpec = config.Genesis
+			} else if config.NetworkID == 88 {
+				// For network ID 88 and 89, use Viction and Victest genesis
+				genesisSpec = core.VictionGenesisBlock()
+			} else if config.NetworkID == 89 {
+				genesisSpec = core.VictestGenesisBlock()
 			} else {
 				genesisSpec = nil
 			}
