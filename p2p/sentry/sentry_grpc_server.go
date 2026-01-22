@@ -1275,12 +1275,24 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 
-	// Use messageCode to check all protocol versions, not just the first one
-	msgcode, protocolVersions := ss.messageCode(inreq.Data.Id)
+	// Check all protocol versions to detect the message ID, not just ss.Protocols
+	var msgcode uint64
+	var protocolVersions mapset.Set[uint] = mapset.NewSet[uint]()
+
+	// Check all available protocol versions: ETH63, ETH67, ETH68
+	for _, version := range []uint{direct.ETH63, direct.ETH67, direct.ETH68} {
+		if val, ok := eth.FromProto[version][inreq.Data.Id]; ok {
+			msgcode = val // Message code is the same across protocol versions
+			protocolVersions.Add(version)
+		}
+	}
+
+	fmt.Println("-> SendMessageByMinBlock msgcode", msgcode, inreq.Data.Id, "protocolVersions", protocolVersions.ToSlice())
+
 	if msgcode == 0 {
-		// Message ID not found in any supported protocol version
-		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s (supported protocols: %v)",
-			inreq.Data.Id, ss.Protocols)
+		// Message ID not found in any protocol version
+		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s (checked protocols: ETH63, ETH67, ETH68)",
+			inreq.Data.Id)
 	}
 
 	// Check if this message code is supported by SendMessageByMinBlock
