@@ -360,11 +360,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var chainConfig *chain.Config
 	var genesis *types.Block
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := core.ReadGenesis(tx)
-		if err != nil {
+	// Check if this is PoSV consensus - if so, we need to use CommitGenesisBlockWithOverride
+	// which handles temporal transactions properly, instead of going through Update() callback
+	isPosv := config.Genesis != nil && config.Genesis.Config != nil &&
+		(config.Genesis.Config.Consensus == chain.PosvConsensus || config.Genesis.Config.Posv != nil)
+
+	if isPosv {
+		// For PoSV, use CommitGenesisBlockWithOverride which creates temporal transaction
+		// First, read existing genesis config if any
+		var genesisConfig *types.Genesis
+		if err := rawChainDB.View(context.Background(), func(tx kv.Tx) error {
+			var err error
+			genesisConfig, err = core.ReadGenesis(tx)
 			return err
+		}); err != nil {
+			panic(err)
 		}
 
 		if genesisConfig != nil {
@@ -375,10 +386,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
+		// Check if genesis already exists
+		var h common.Hash
+		if err := rawChainDB.View(context.Background(), func(tx kv.Tx) error {
+			var err error
+			h, err = rawdb.ReadCanonicalHash(tx, 0)
+			return err
+		}); err != nil {
 			panic(err)
 		}
+
 		genesisSpec := config.Genesis
 		if h != (common.Hash{}) { // fallback to db content
 			// For custom network ID 1337, always use custom genesis
@@ -393,15 +410,53 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				genesisSpec = nil
 			}
 		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
-			return genesisErr
-		}
 
-		return nil
-	}); err != nil {
-		panic(err)
+		var genesisErr error
+		chainConfig, genesis, genesisErr = core.CommitGenesisBlockWithOverride(rawChainDB, genesisSpec, config.OverrideOsakaTime, dirs, logger)
+		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+			panic(genesisErr)
+		}
+	} else {
+		// For non-PoSV, use regular transaction flow
+		if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+
+			genesisConfig, err := core.ReadGenesis(tx)
+			if err != nil {
+				return err
+			}
+
+			if genesisConfig != nil {
+				config.Genesis = genesisConfig
+			}
+
+			if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+				tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
+			}
+
+			h, err := rawdb.ReadCanonicalHash(tx, 0)
+			if err != nil {
+				panic(err)
+			}
+			genesisSpec := config.Genesis
+			if h != (common.Hash{}) { // fallback to db content
+				// For custom network ID 1337, always use custom genesis
+				if config.NetworkID == 1337 {
+					genesisSpec = config.Genesis
+				} else {
+					genesisSpec = nil
+				}
+			}
+			var genesisErr error
+			// Pass rawChainDB for PoSV to create temporal transaction if needed
+			chainConfig, genesis, genesisErr = core.WriteGenesisBlockWithDB(tx, rawChainDB, genesisSpec, config.OverrideOsakaTime, dirs, logger)
+			if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+				return genesisErr
+			}
+
+			return nil
+		}); err != nil {
+			panic(err)
+		}
 	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
@@ -611,7 +666,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
 	} else if chainConfig.Posv != nil {
-		consensusConfig = &config.Clique
+		consensusConfig = params.PosvSnapshot
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {

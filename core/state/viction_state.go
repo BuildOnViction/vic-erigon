@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -89,15 +90,39 @@ var vicValidatorStorageMap = map[string]*big.Int{
 
 // Return all addressed that are proposed as validators.
 func (sdb *IntraBlockState) VicGetCandidates(contractAddress common.Address) []common.Address {
-	candidatesSlot := StorageLocation(vicValidatorStorageMap["candidates"].Bytes())
-	candidatesStateData, _ := sdb.GetState2(contractAddress, candidatesSlot.Hash())
+	// Get the candidates slot bytes
+	candidatesSlotBytes := vicValidatorStorageMap["candidates"].Bytes()
+	candidatesSlot := StorageLocation(candidatesSlotBytes)
+	candidatesSlotHash := candidatesSlot.Hash()
+
+	candidatesStateData, err := sdb.GetState2(contractAddress, candidatesSlotHash)
+	if err != nil {
+		return []common.Address{}
+	}
+
 	candidates := []common.Address{}
-	for i := uint64(0); i <= candidatesStateData.Uint64(); i++ {
+	candidateCount := candidatesStateData.Uint64()
+
+	for i := uint64(0); i <= candidateCount; i++ {
 		candidateSlot := StorageLocationOfDynamicArrayElement(candidatesSlot, i, 160)
-		candidateStateData, _ := sdb.GetState2(contractAddress, candidateSlot.Hash())
+		candidateSlotHash := candidateSlot.Hash()
+
+		candidateStateData, err := sdb.GetState2(contractAddress, candidateSlotHash)
+		if err != nil {
+			continue
+		}
+
 		candidate := common.BytesToAddress(candidateStateData.Bytes())
 		candidates = append(candidates, candidate)
 	}
+
+	// Log candidates as a simple list
+	candidateList := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		candidateList[i] = candidate.Hex()
+	}
+	fmt.Println("VicGetCandidates candidates ->", candidateList)
+
 	return candidates
 }
 
@@ -144,7 +169,7 @@ func (sdb *IntraBlockState) VicGetValidatorVoterCap(contractAddress common.Addre
 
 // Alternative version of GetState that returns uint256.Int as result instead of modifying input parameter.
 func (sdb *IntraBlockState) GetState2(contractAddress common.Address, storLoc common.Hash) (*uint256.Int, error) {
-	var stateData *uint256.Int
-	err := sdb.GetState(contractAddress, storLoc, stateData)
-	return stateData, err
+	var stateData uint256.Int
+	err := sdb.GetState(contractAddress, storLoc, &stateData)
+	return &stateData, err
 }

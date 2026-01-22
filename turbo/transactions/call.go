@@ -53,14 +53,6 @@ func DoCall(
 	headerReader interfaces.HeaderReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
-	// todo: Pending state is only known by the miner
-	/*
-		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
-			block, state, _ := b.eth.miner.Pending()
-			return state, block.Header(), nil
-		}
-	*/
-
 	state := state.New(stateReader)
 
 	// Override the fields of specified contracts before execution.
@@ -96,6 +88,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
+
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
@@ -118,6 +111,7 @@ func DoCall(
 	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
+
 	return result, nil
 }
 

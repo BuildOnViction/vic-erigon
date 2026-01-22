@@ -31,7 +31,7 @@ func (s StorageLocation) Big() *big.Int {
 }
 
 func (s StorageLocation) Hash() common.Hash {
-	return common.CastToHash(s)
+	return common.BytesToHash(s)
 }
 
 // Calculate storage slot of a element in a dynamic size array. elementSize is their data type's size in bits.
