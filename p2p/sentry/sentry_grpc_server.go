@@ -1304,8 +1304,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 	}
 
 	// Log which protocol versions support this message
-	log.Debug("[SendMessageByMinBlock] MessageId: %s, MsgCode: %d, SupportedProtocolVersions: %v\n",
-		inreq.Data.Id, msgcode, protocolVersions.ToSlice())
+	log.Debug("[SendMessageByMinBlock]", "MessageId", inreq.Data.Id, "MsgCode", msgcode, "SupportedProtocolVersions", protocolVersions.ToSlice())
 
 	if inreq.MaxPeers == 1 {
 		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
