@@ -143,8 +143,6 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	blockNumber, _, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
-	fmt.Println("-> blockNumber", blockNumber)
-	fmt.Println("-> latest::1", latest)
 	if err != nil {
 		return nil, err
 	}
