@@ -1,5 +1,5 @@
-// // Copyright 2024 The Erigon Authors
-// // This file is part of Erigon.
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
 
 package sentry
 
@@ -33,10 +33,15 @@ func NewETH63Handler(sentry *GrpcServer, logger log.Logger) *ETH63Handler {
 }
 
 // HandleETH63Message processes incoming ETH/63 messages from Geth 1.9 and similar clients
+// Note: This handler is currently unused in production. ETH/63 messages are handled
+// directly in sentry_grpc_server.go:runPeer(). This handler may be used for future
+// specialized ETH/63 message processing.
 func (h *ETH63Handler) HandleETH63Message(ctx context.Context, msgCode uint64, peerID [64]byte, data []byte) error {
+	// Context is reserved for future use (cancellation, timeouts)
+	_ = ctx
 	switch msgCode {
 	case eth.TransactionsMsg:
-		fmt.Println("-> HandleETH63Message: TransactionsMsg")
+		h.logger.Info("[ETH/63] Handling transactions message", "peer", fmt.Sprintf("%x", peerID[:8]))
 		return h.handleETH63Transactions(data, peerID)
 	case eth.NewBlockHashesMsg:
 		return h.handleETH63NewBlockHashes(data, peerID)
@@ -55,14 +60,14 @@ func (h *ETH63Handler) HandleETH63Message(ctx context.Context, msgCode uint64, p
 	case eth.ReceiptsMsg:
 		return h.handleETH63Receipts(data, peerID)
 	default:
-		h.logger.Debug("[ETH/63] Unknown message code", "code", msgCode, "peer", fmt.Sprintf("%x", peerID[:8]))
+		h.logger.Info("[ETH/63] Unknown message code", "code", msgCode, "peer", fmt.Sprintf("%x", peerID[:8]))
 		return nil
 	}
 }
 
 // handleETH63Transactions processes transaction messages from ETH/63 clients
 func (h *ETH63Handler) handleETH63Transactions(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📦 Received transactions from Geth 1.9 client",
+	h.logger.Info("[ETH/63] Received transactions from Geth 1.9 client",
 		"peer", fmt.Sprintf("%x", peerID[:8]),
 		"data_size", len(data))
 
@@ -73,13 +78,13 @@ func (h *ETH63Handler) handleETH63Transactions(data []byte, peerID [64]byte) err
 		return err
 	}
 
-	h.logger.Info("[ETH/63] ✅ Decoded transactions",
+	h.logger.Info("[ETH/63] Decoded transactions",
 		"count", len(transactions),
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	// Process each transaction
 	for i, tx := range transactions {
-		h.logger.Info("[ETH/63] 💰 Processing transaction",
+		h.logger.Info("[ETH/63] Processing transaction",
 			"index", i+1,
 			"hash", tx.Hash().Hex(),
 			"value", tx.Value().String(),
@@ -89,16 +94,10 @@ func (h *ETH63Handler) handleETH63Transactions(data []byte, peerID [64]byte) err
 
 		// Validate transaction signature
 		if err := h.validateETH63Transaction(tx); err != nil {
-			h.logger.Error("[ETH/63] Invalid transaction signature",
+			h.logger.Warn("[ETH/63] Invalid transaction signature",
 				"hash", tx.Hash().Hex(), "err", err)
 			continue
 		}
-		// sender, err := Sender(HomesteadSigner{}, tx)
-		// if err != nil {
-		// 	h.logger.Error("[ETH/63] Failed to get sender", "hash", tx.Hash().Hex(), "err", err)
-		// 	continue
-		// }
-		// fmt.Println("-> validateETH63Transaction: Valid transaction signature", tx.Hash().Hex(), "sender", sender.Hex(), "to", tx.To().Hex())
 
 		// Forward to Erigon's transaction pool via gRPC
 		if err := h.forwardTransactionToErigon(tx); err != nil {
@@ -114,7 +113,6 @@ func (h *ETH63Handler) handleETH63Transactions(data []byte, peerID [64]byte) err
 func (h *ETH63Handler) validateETH63Transaction(tx *eth63.ETH63Transaction) error {
 	// Check if transaction has signature
 	v, r, s := tx.RawSignatureValues()
-	fmt.Println("tx", tx.Hash().Hex(), v, r, s)
 	if v.Sign() == 0 && r.Sign() == 0 && s.Sign() == 0 {
 		return fmt.Errorf("transaction has no signature")
 	}
@@ -136,7 +134,7 @@ func (h *ETH63Handler) validateETH63Transaction(tx *eth63.ETH63Transaction) erro
 		return fmt.Errorf("failed to recover sender: %w", err)
 	}
 
-	h.logger.Debug("[ETH/63] ✅ Transaction signature validated",
+	h.logger.Info("[ETH/63] Transaction signature validated",
 		"hash", tx.Hash().Hex(),
 		"sender", sender.Hex(),
 		"protected", tx.Protected())
@@ -146,7 +144,7 @@ func (h *ETH63Handler) validateETH63Transaction(tx *eth63.ETH63Transaction) erro
 
 // handleETH63NewBlockHashes processes new block hash announcements from ETH/63 clients
 func (h *ETH63Handler) handleETH63NewBlockHashes(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 🏗️ Received new block hashes",
+	h.logger.Info("[ETH/63] Received new block hashes",
 		"peer", fmt.Sprintf("%x", peerID[:8]),
 		"data_size", len(data))
 
@@ -161,7 +159,7 @@ func (h *ETH63Handler) handleETH63NewBlockHashes(data []byte, peerID [64]byte) e
 	}
 
 	for _, announcement := range announcements {
-		h.logger.Info("[ETH/63] 📋 New block announced",
+		h.logger.Info("[ETH/63] New block announced",
 			"hash", announcement.Hash.Hex(),
 			"number", announcement.Number,
 			"peer", fmt.Sprintf("%x", peerID[:8]))
@@ -172,7 +170,7 @@ func (h *ETH63Handler) handleETH63NewBlockHashes(data []byte, peerID [64]byte) e
 
 // handleETH63NewBlock processes new block messages from ETH/63 clients
 func (h *ETH63Handler) handleETH63NewBlock(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 🏗️ Received new block",
+	h.logger.Info("[ETH/63] Received new block",
 		"peer", fmt.Sprintf("%x", peerID[:8]),
 		"data_size", len(data))
 
@@ -182,7 +180,7 @@ func (h *ETH63Handler) handleETH63NewBlock(data []byte, peerID [64]byte) error {
 
 // handleETH63GetBlockHeaders processes block header requests from ETH/63 clients
 func (h *ETH63Handler) handleETH63GetBlockHeaders(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📋 Received get block headers request",
+	h.logger.Info("[ETH/63] Received get block headers request",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	// Forward to Erigon for processing
@@ -191,7 +189,7 @@ func (h *ETH63Handler) handleETH63GetBlockHeaders(data []byte, peerID [64]byte) 
 
 // handleETH63BlockHeaders processes block header responses from ETH/63 clients
 func (h *ETH63Handler) handleETH63BlockHeaders(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📋 Received block headers",
+	h.logger.Info("[ETH/63] Received block headers",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	return h.forwardToErigon(proto_sentry.MessageId_BLOCK_HEADERS_63, peerID, data)
@@ -199,7 +197,7 @@ func (h *ETH63Handler) handleETH63BlockHeaders(data []byte, peerID [64]byte) err
 
 // handleETH63GetBlockBodies processes block body requests from ETH/63 clients
 func (h *ETH63Handler) handleETH63GetBlockBodies(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📦 Received get block bodies request",
+	h.logger.Info("[ETH/63] Received get block bodies request",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	return h.forwardToErigon(proto_sentry.MessageId_GET_BLOCK_BODIES_63, peerID, data)
@@ -207,7 +205,7 @@ func (h *ETH63Handler) handleETH63GetBlockBodies(data []byte, peerID [64]byte) e
 
 // handleETH63BlockBodies processes block body responses from ETH/63 clients
 func (h *ETH63Handler) handleETH63BlockBodies(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📦 Received block bodies",
+	h.logger.Info("[ETH/63] Received block bodies",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	return h.forwardToErigon(proto_sentry.MessageId_BLOCK_BODIES_63, peerID, data)
@@ -215,7 +213,7 @@ func (h *ETH63Handler) handleETH63BlockBodies(data []byte, peerID [64]byte) erro
 
 // handleETH63GetReceipts processes receipt requests from ETH/63 clients
 func (h *ETH63Handler) handleETH63GetReceipts(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📄 Received get receipts request",
+	h.logger.Info("[ETH/63] Received get receipts request",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	return h.forwardToErigon(proto_sentry.MessageId_GET_RECEIPTS_63, peerID, data)
@@ -223,7 +221,7 @@ func (h *ETH63Handler) handleETH63GetReceipts(data []byte, peerID [64]byte) erro
 
 // handleETH63Receipts processes receipt responses from ETH/63 clients
 func (h *ETH63Handler) handleETH63Receipts(data []byte, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 🧾 Received receipts",
+	h.logger.Info("[ETH/63] Received receipts",
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
 	return h.forwardToErigon(proto_sentry.MessageId_RECEIPTS_63, peerID, data)
@@ -238,7 +236,7 @@ func (h *ETH63Handler) forwardTransactionToErigon(tx *eth63.ETH63Transaction) er
 		return fmt.Errorf("failed to encode transactions payload: %w", err)
 	}
 
-	h.logger.Info("[ETH/63] 🚀 Forwarding transaction to Erigon",
+	h.logger.Info("[ETH/63] Forwarding transaction to Erigon",
 		"hash", tx.Hash().Hex(),
 		"payload_size", len(payload))
 
@@ -246,24 +244,18 @@ func (h *ETH63Handler) forwardTransactionToErigon(tx *eth63.ETH63Transaction) er
 	h.sentry.send(proto_sentry.MessageId_TRANSACTIONS_63, [64]byte{}, payload)
 
 	// Log the transaction details
-	h.logger.Info("[ETH/63] ✅ Transaction forwarded to Erigon",
+	h.logger.Info("[ETH/63] Transaction forwarded to Erigon",
 		"hash", tx.Hash().Hex(),
 		"nonce", tx.Nonce(),
 		"value", tx.Value().String(),
 		"gas_price", tx.GasPrice().String(),
 		"gas_limit", tx.Gas())
-	// sender, err := Sender(HomesteadSigner{}, tx)
-	// if err != nil {
-	// 	h.logger.Error("[ETH/63] Failed to get sender", "hash", tx.Hash().Hex(), "err", err)
-	// 	return err
-	// }
-	// fmt.Println("-> forwardTransactionToErigon: Transaction forwarded to Erigon", tx.Hash().Hex(), "sender", sender.Hex(), "to", tx.To().Hex())
 	return nil
 }
 
 // forwardToErigon forwards a message to Erigon's internal handlers
 func (h *ETH63Handler) forwardToErigon(msgID proto_sentry.MessageId, peerID [64]byte, data []byte) error {
-	h.logger.Debug("[ETH/63] �� Forwarding message to Erigon",
+	h.logger.Info("[ETH/63] �� Forwarding message to Erigon",
 		"message", msgID.String(),
 		"peer", fmt.Sprintf("%x", peerID[:8]),
 		"data_size", len(data))
@@ -274,7 +266,7 @@ func (h *ETH63Handler) forwardToErigon(msgID proto_sentry.MessageId, peerID [64]
 
 // GenerateETH63Transaction creates a sample transaction for testing ETH/63 compatibility
 func (h *ETH63Handler) GenerateETH63Transaction() *eth63.ETH63Transaction {
-	h.logger.Info("[ETH/63] 🔧 Generating sample transaction for testing")
+	h.logger.Info("[ETH/63] Generating sample transaction for testing")
 
 	// Generate random transaction data for testing
 	nonce := uint64(time.Now().Unix())
@@ -289,7 +281,7 @@ func (h *ETH63Handler) GenerateETH63Transaction() *eth63.ETH63Transaction {
 	// Create ETH63Transaction (compatible with old go-ethereum interface)
 	tx := eth63.NewETH63Transaction(nonce, to, value, gasLimit, gasPrice, nil)
 
-	h.logger.Info("[ETH/63] ✅ Generated transaction",
+	h.logger.Info("[ETH/63] Generated transaction",
 		"hash", tx.Hash().Hex(),
 		"nonce", nonce,
 		"to", to.Hex(),
@@ -301,7 +293,7 @@ func (h *ETH63Handler) GenerateETH63Transaction() *eth63.ETH63Transaction {
 
 // SendETH63TransactionToPeer sends a transaction to an ETH/63 peer
 func (h *ETH63Handler) SendETH63TransactionToPeer(tx *eth63.ETH63Transaction, peerID [64]byte) error {
-	h.logger.Info("[ETH/63] 📤 Sending transaction to ETH/63 peer",
+	h.logger.Info("[ETH/63] Sending transaction to ETH/63 peer",
 		"hash", tx.Hash().Hex(),
 		"peer", fmt.Sprintf("%x", peerID[:8]))
 
@@ -321,7 +313,7 @@ func (h *ETH63Handler) SendETH63TransactionToPeer(tx *eth63.ETH63Transaction, pe
 	// Send via P2P protocol (ETH/63 transaction message)
 	h.sentry.writePeer("[ETH/63] sendTransaction", peerInfo, eth.TransactionsMsg, payload, 0)
 
-	h.logger.Info("[ETH/63] ✅ Transaction sent to peer",
+	h.logger.Info("[ETH/63] Transaction sent to peer",
 		"hash", tx.Hash().Hex(),
 		"peer", fmt.Sprintf("%x", peerID[:8]),
 		"payload_size", len(payload))
@@ -331,7 +323,7 @@ func (h *ETH63Handler) SendETH63TransactionToPeer(tx *eth63.ETH63Transaction, pe
 
 // BroadcastETH63Transaction broadcasts a transaction to all ETH/63 peers
 func (h *ETH63Handler) BroadcastETH63Transaction(tx *eth63.ETH63Transaction) error {
-	h.logger.Info("[ETH/63] 📢 Broadcasting transaction to all ETH/63 peers",
+	h.logger.Info("[ETH/63] Broadcasting transaction to all ETH/63 peers",
 		"hash", tx.Hash().Hex())
 
 	count := 0
@@ -349,7 +341,7 @@ func (h *ETH63Handler) BroadcastETH63Transaction(tx *eth63.ETH63Transaction) err
 		return true
 	})
 
-	h.logger.Info("[ETH/63] ✅ Transaction broadcasted",
+	h.logger.Info("[ETH/63] Transaction broadcasted",
 		"hash", tx.Hash().Hex(),
 		"peers_count", count)
 

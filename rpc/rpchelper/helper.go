@@ -163,16 +163,21 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
-	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if txNum < r.StateHistoryStartFrom() {
+	// To get state at the END of block (blockNumber-1), use txNum just before blockNumber starts
+	txNum := minTxNum - 1
+	historyStartFrom := r.StateHistoryStartFrom()
+	fmt.Printf("-> txNum=%d, StateHistoryStartFrom=%d\n", txNum, historyStartFrom)
+	if txNum < historyStartFrom {
+		fmt.Printf("-> ERROR: txNum %d < StateHistoryStartFrom %d, returning PrunedError\n", txNum, historyStartFrom)
 		return r, state.PrunedError
 	}
 	r.SetTxNum(txNum)
+	fmt.Printf("-> Querying block %d: using blockNumber+1=%d, minTxNum=%d, calculated txNum=%d\n",
+		blockNumber-1, blockNumber, minTxNum, txNum)
 	return r, nil
 }
 

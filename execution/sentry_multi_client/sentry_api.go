@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-p2p/protocols/eth"
@@ -33,6 +34,46 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
+
+// detectSentryProtocol detects the protocol version for a specific sentry client
+func detectSentryProtocol(ctx context.Context, sentry proto_sentry.SentryClient) proto_sentry.Protocol {
+	// Method 1: Try Protocol() method (returns uint)
+	if protocolMethod, ok := sentry.(interface{ Protocol() uint }); ok {
+		protocolUint := protocolMethod.Protocol()
+		switch protocolUint {
+		case 63:
+			return proto_sentry.Protocol_ETH63
+		case 67:
+			return proto_sentry.Protocol_ETH67
+		case 68:
+			return proto_sentry.Protocol_ETH68
+		default:
+			return proto_sentry.Protocol_ETH67
+		}
+	}
+
+	// Method 2: Try GetProtocol() method
+	if protocolMethod, ok := sentry.(interface{ GetProtocol() proto_sentry.Protocol }); ok {
+		return protocolMethod.GetProtocol()
+	}
+
+	// Method 3: Try context
+	if ctxProtocol, ok := ctx.Value("protocol").(proto_sentry.Protocol); ok {
+		return ctxProtocol
+	}
+
+	// Default to ETH/67
+	return proto_sentry.Protocol_ETH67
+}
+
+// getPeerName attempts to get the peer name from sentry, returns "unknown" if unavailable
+func (cs *MultiClient) getPeerName(ctx context.Context, sentry proto_sentry.SentryClient, peerID *proto_types.H512) string {
+	peerInfoReply, err := sentry.PeerById(ctx, &proto_sentry.PeerByIdRequest{PeerId: peerID}, &grpc.EmptyCallOption{})
+	if err == nil && peerInfoReply != nil && peerInfoReply.Peer != nil && peerInfoReply.Peer.Name != "" {
+		return peerInfoReply.Peer.Name
+	}
+	return "unknown"
+}
 
 // Methods of sentry called by Core
 
@@ -55,145 +96,122 @@ func (cs *MultiClient) SetStatus(ctx context.Context) {
 }
 
 func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) (peerID [64]byte, ok bool) {
-	// fmt.Println("----> SendBodyRequest", req.BlockNums)
-
-	// Try different ways to get protocol information
-	var currentProtocol proto_sentry.Protocol
-	var protocolDetected bool
-
-	for _, sentry := range cs.sentries {
-		if protocolMethod, ok := sentry.(interface{ Protocol() uint }); ok {
-			protocolUint := protocolMethod.Protocol()
-			// Convert uint to proto_sentry.Protocol
-			switch protocolUint {
-			case 63:
-				currentProtocol = proto_sentry.Protocol_ETH63
-				protocolDetected = true
-				break
-			default:
-				currentProtocol = proto_sentry.Protocol_ETH67
-				protocolDetected = true
-				break
-			}
-			if protocolDetected {
-				break
-			}
-		}
-	}
-
-	if !protocolDetected {
-		for _, sentry := range cs.sentries {
-			if protocolMethod, ok := sentry.(interface{ GetProtocol() proto_sentry.Protocol }); ok {
-				currentProtocol = protocolMethod.GetProtocol()
-				protocolDetected = true
-				break
-			}
-		}
-	}
-
-	if !protocolDetected {
-		if ctxProtocol, ok := ctx.Value("protocol").(proto_sentry.Protocol); ok {
-			currentProtocol = ctxProtocol
-			protocolDetected = true
-		}
-	}
-
-	// Default to ETH/67 if no protocol detected
-	if !protocolDetected {
-		currentProtocol = proto_sentry.Protocol_ETH67
-	}
-	// if sentry not found peers to send such message, try next one. stop if found.
+	// Try each sentry until we find one that can handle the request
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
 			continue
 		}
 
-		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
-		var bytes []byte
-		var err error
-		var messageId proto_sentry.MessageId
-
-		// Use appropriate format based on detected protocol
-		switch currentProtocol {
-		case proto_sentry.Protocol_ETH63:
-			bytes, err = rlp.EncodeToBytes(eth.GetBlockBodiesPacket(req.Hashes))
-			messageId = proto_sentry.MessageId_GET_BLOCK_BODIES_63
-			// fmt.Println("---> SendBodyRequest ETH/63 format:", bytes)
-		default:
-			// Default to ETH/66+ for other protocols
-			bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
-				RequestId:            rand.Uint64(), // nolint: gosec
-				GetBlockBodiesPacket: req.Hashes,
-			})
-			messageId = proto_sentry.MessageId_GET_BLOCK_BODIES_66
-			// fmt.Println("---> SendBodyRequest ETH/66+ format (default):", bytes)
+		// Try all protocol versions in order: ETH/63, ETH/67, ETH/68
+		// This ensures we use the protocol version that has available peers
+		protocolsToTry := []proto_sentry.Protocol{
+			proto_sentry.Protocol_ETH63,
+			proto_sentry.Protocol_ETH67,
+			proto_sentry.Protocol_ETH68,
 		}
 
-		for i, b := range req.Hashes {
-			fmt.Println("----> req body for hash:", req.BlockNums[i], b.String())
-		}
-		if err != nil {
-			cs.logger.Error("Could not encode block bodies request", "err", err)
-			return [64]byte{}, false
-		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.BlockNums[len(req.BlockNums)-1],
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   messageId,
-				Data: bytes,
-			},
-			MaxPeers: 1,
+		var (
+			bytes     []byte
+			err       error
+			messageId proto_sentry.MessageId
+		)
+
+		// Try each protocol version until one succeeds
+		var sentPeers *proto_sentry.SentPeers
+		var successfulProtocol proto_sentry.Protocol
+		var successfulMessageId proto_sentry.MessageId
+
+		for _, protocol := range protocolsToTry {
+			// Use the appropriate message format based on protocol
+			switch protocol {
+			case proto_sentry.Protocol_ETH63:
+				// For ETH/63, use the legacy format without request ID
+				bytes, err = rlp.EncodeToBytes(eth.GetBlockBodiesPacket(req.Hashes))
+				if err != nil {
+					cs.logger.Warn("Could not encode ETH/63 body request", "err", err, "sentryIndex", i)
+					continue
+				}
+				messageId = proto_sentry.MessageId_GET_BLOCK_BODIES_63
+
+			case proto_sentry.Protocol_ETH67, proto_sentry.Protocol_ETH68:
+				// For ETH/66+, use format with request ID
+				bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+					RequestId:            rand.Uint64(), // nolint: gosec
+					GetBlockBodiesPacket: req.Hashes,
+				})
+				if err != nil {
+					cs.logger.Warn("Could not encode ETH/66+ body request", "err", err, "sentryIndex", i, "protocol", protocol.String())
+					continue
+				}
+				messageId = proto_sentry.MessageId_GET_BLOCK_BODIES_66
+
+			default:
+				continue
+			}
+
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
+				MinBlock: req.BlockNums[len(req.BlockNums)-1],
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   messageId,
+					Data: bytes,
+				},
+				MaxPeers: 1,
+			}
+
+			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				cs.logger.Warn("Could not send body request",
+					"protocol", protocol.String(),
+					"messageId", messageId.String(),
+					"sentryIndex", i,
+					"err", err)
+				continue
+			}
+
+			// Check for empty peers - if we got peers, this protocol version works!
+			if sentPeers != nil && len(sentPeers.Peers) > 0 {
+				successfulProtocol = protocol
+				successfulMessageId = messageId
+				break // Found a working protocol version
+			}
 		}
 
-		// fmt.Printf("----> SendBodyRequest Message Details:\n")
-		// fmt.Printf("  Message ID: %s (value: %d)\n", messageId.String(), int32(messageId))
-		// fmt.Printf("  Data Size: %d bytes\n", len(bytes))
-		// fmt.Printf("  Block Count: %d\n", len(req.BlockNums))
-
-		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err1 != nil {
-			cs.logger.Error("Could not send block bodies request", "err", err1)
-			return [64]byte{}, false
-		}
+		// If no protocol version succeeded, try next sentry
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
 			continue
 		}
-		peerId := sentry.ConvertH512ToPeerID(sentPeers.Peers[0])
-		fmt.Println("----> sent SendBodyRequest to peer:", peerId[:8], i)
-		return sentry.ConvertH512ToPeerID(sentPeers.Peers[0]), true
+
+		// Now safe to access sentPeers.Peers[0]
+		peerID := sentry.ConvertH512ToPeerID(sentPeers.Peers[0])
+
+		// Get peer name for logging
+		peerName := cs.getPeerName(ctx, cs.sentries[i], sentPeers.Peers[0])
+
+		cs.logger.Info("Sent body request to peer",
+			"protocol", successfulProtocol.String(),
+			"messageId", successfulMessageId.String(),
+			"peer", fmt.Sprintf("%x", peerID[:8]),
+			"peerName", peerName,
+			"sentryIndex", i,
+			"blockCount", len(req.BlockNums))
+		return peerID, true
 	}
-	// fmt.Println("----> sent SendBodyRequest to no peer")
+
 	return [64]byte{}, false
 }
 
 func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
-	// Get protocol from context or use default
-	// fmt.Println("----> SendHeaderRequest header:", req)
-
 	// If hash is zero but we have a number, try to look up the hash from database
 	hash := req.Hash
 	if hash == (common.Hash{}) && req.Number > 0 {
-		cs.logger.Debug("[SendHeaderRequest] Hash is zero, looking up from database",
-			"number", req.Number)
-
-		// Look up the hash from the database using the block number
 		err := cs.db.View(ctx, func(tx kv.Tx) error {
-			var ok bool
+			var found bool
 			var err error
-			hash, ok, err = cs.blockReader.CanonicalHash(ctx, tx, req.Number)
+			hash, found, err = cs.blockReader.CanonicalHash(ctx, tx, req.Number)
 			if err != nil {
 				return err
 			}
-			if !ok || hash == (common.Hash{}) {
-				// Hash not found in database, will use number-based request
-				cs.logger.Debug("[SendHeaderRequest] Could not find canonical hash for block number",
-					"number", req.Number,
-					"note", "Request will be sent as number-based")
-			} else {
-				cs.logger.Info("[SendHeaderRequest] Successfully looked up hash",
-					"number", req.Number,
-					"hash", hash.Hex())
-			}
+			_ = found // Hash lookup result (used for validation if needed)
 			return nil
 		})
 		if err != nil {
@@ -204,70 +222,18 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 	}
 
-	cs.logger.Debug("[SendHeaderRequest] Starting request",
-		"number", req.Number,
-		"hash", hash.Hex(), // Use the looked-up hash
-		"originalHash", req.Hash.Hex(),
-		"length", req.Length,
-		"sentryCount", len(cs.sentries),
-		"hashWasZero", req.Hash == (common.Hash{}))
-
 	// Try each sentry until we find one that can handle the request
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 		if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {
-			cs.logger.Debug("[SendHeaderRequest] Sentry not ready", "sentryIndex", i)
 			continue
 		}
 
-		// Detect protocol for THIS specific sentry
-		var protocol proto_sentry.Protocol
-		var protocolDetected bool
-
-		// Method 1: Try Protocol() method from this sentry
-		if protocolMethod, ok := cs.sentries[i].(interface{ Protocol() uint }); ok {
-			protocolUint := protocolMethod.Protocol()
-			switch protocolUint {
-			case 63:
-				protocol = proto_sentry.Protocol_ETH63
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Detected ETH/63 from sentry", "sentryIndex", i, "version", protocolUint)
-			case 67:
-				protocol = proto_sentry.Protocol_ETH67
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Detected ETH/67 from sentry", "sentryIndex", i, "version", protocolUint)
-			case 68:
-				protocol = proto_sentry.Protocol_ETH68
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Detected ETH/68 from sentry", "sentryIndex", i, "version", protocolUint)
-			default:
-				protocol = proto_sentry.Protocol_ETH67
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Using default ETH/67 for sentry", "sentryIndex", i, "version", protocolUint)
-			}
-		}
-
-		// Method 2: Try GetProtocol() method
-		if !protocolDetected {
-			if protocolMethod, ok := cs.sentries[i].(interface{ GetProtocol() proto_sentry.Protocol }); ok {
-				protocol = protocolMethod.GetProtocol()
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Detected protocol via GetProtocol", "sentryIndex", i, "protocol", protocol.String())
-			}
-		}
-
-		// Method 3: Try context
-		if !protocolDetected {
-			if ctxProtocol, ok := ctx.Value("protocol").(proto_sentry.Protocol); ok {
-				protocol = ctxProtocol
-				protocolDetected = true
-				cs.logger.Debug("[SendHeaderRequest] Using protocol from context", "sentryIndex", i, "protocol", protocol.String())
-			}
-		}
-
-		// Default to ETH/67 if not detected
-		if !protocolDetected {
-			protocol = proto_sentry.Protocol_ETH67
-			cs.logger.Debug("[SendHeaderRequest] Using default protocol", "sentryIndex", i, "protocol", protocol.String())
+		// Try all protocol versions in order: ETH/63, ETH/67, ETH/68
+		// This ensures we use the protocol version that has available peers
+		protocolsToTry := []proto_sentry.Protocol{
+			proto_sentry.Protocol_ETH63,
+			proto_sentry.Protocol_ETH67,
+			proto_sentry.Protocol_ETH68,
 		}
 
 		var (
@@ -280,132 +246,117 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		// Create the request data
 		requestID := rand.Uint64()
 
-		// Use the appropriate message format based on THIS sentry's protocol
-		switch protocol {
-		case proto_sentry.Protocol_ETH63:
-			// For ETH/63, use the legacy format without request ID
-			req63 := &eth.GetBlockHeadersPacket{
-				Origin: eth.HashOrNumber{
-					Hash:   hash, // Use the looked-up hash
-					Number: 0,    // Must be 0 when hash is provided (HashOrNumber encoding requirement)
-				},
-				Amount:  req.Length,
-				Skip:    req.Skip,
-				Reverse: req.Reverse,
-			}
-			// If hash is zero, use number-based request
-			if hash == (common.Hash{}) {
-				req63.Origin.Number = req.Number
-				req63.Origin.Hash = common.Hash{}
-			}
-			var err error
-			bytes, err = rlp.EncodeToBytes(req63)
-			if err != nil {
-				cs.logger.Error("Could not encode ETH/63 header request", "err", err, "sentryIndex", i)
-				continue
-			}
-			messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_63
-			cs.logger.Debug("[SendHeaderRequest] Encoded ETH/63 request",
-				"messageId", messageId.String(),
-				"size", len(bytes),
-				"number", req.Number,
-				"hash", hash.Hex(), // Log the actual hash being used
-				"sentryIndex", i,
-				"usingHash", hash != (common.Hash{}))
+		// Try each protocol version until one succeeds
+		var sentPeers *proto_sentry.SentPeers
+		// var successfulProtocol proto_sentry.Protocol
+		// var successfulMessageId proto_sentry.MessageId
 
-		case proto_sentry.Protocol_ETH67, proto_sentry.Protocol_ETH68:
-			// For ETH/66+, use format with request ID
-			req66 := &eth.GetBlockHeadersPacket66{
-				RequestId: requestID,
-				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+		for _, protocol := range protocolsToTry {
+			// Use the appropriate message format based on protocol
+			switch protocol {
+			case proto_sentry.Protocol_ETH63:
+				// For ETH/63, use the legacy format without request ID
+				req63 := &eth.GetBlockHeadersPacket{
 					Origin: eth.HashOrNumber{
-						Hash:   hash, // Use the looked-up hash
-						Number: 0,    // Must be 0 when hash is provided (HashOrNumber encoding requirement)
+						Hash:   hash,
+						Number: 0, // Must be 0 when hash is provided
 					},
 					Amount:  req.Length,
 					Skip:    req.Skip,
 					Reverse: req.Reverse,
-				},
-			}
-			// If hash is zero, use number-based request
-			if hash == (common.Hash{}) {
-				req66.GetBlockHeadersPacket.Origin.Number = req.Number
-				req66.GetBlockHeadersPacket.Origin.Hash = common.Hash{}
-			}
-			var err error
-			bytes, err = rlp.EncodeToBytes(req66)
-			if err != nil {
-				cs.logger.Error("Could not encode ETH/66+ header request", "err", err, "sentryIndex", i)
+				}
+				// If hash is zero, use number-based request
+				if hash == (common.Hash{}) {
+					req63.Origin.Number = req.Number
+					req63.Origin.Hash = common.Hash{}
+				}
+				bytes, err = rlp.EncodeToBytes(req63)
+				if err != nil {
+					cs.logger.Warn("Could not encode ETH/63 header request", "err", err, "sentryIndex", i)
+					continue
+				}
+				messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_63
+
+			case proto_sentry.Protocol_ETH67, proto_sentry.Protocol_ETH68:
+				// For ETH/66+, use format with request ID
+				req66 := &eth.GetBlockHeadersPacket66{
+					RequestId: requestID,
+					GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+						Origin: eth.HashOrNumber{
+							Hash:   hash,
+							Number: 0, // Must be 0 when hash is provided
+						},
+						Amount:  req.Length,
+						Skip:    req.Skip,
+						Reverse: req.Reverse,
+					},
+				}
+				// If hash is zero, use number-based request
+				if hash == (common.Hash{}) {
+					req66.GetBlockHeadersPacket.Origin.Number = req.Number
+					req66.GetBlockHeadersPacket.Origin.Hash = common.Hash{}
+				}
+				bytes, err = rlp.EncodeToBytes(req66)
+				if err != nil {
+					cs.logger.Warn("Could not encode ETH/66+ header request", "err", err, "sentryIndex", i, "protocol", protocol.String())
+					continue
+				}
+				messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_66
+
+			default:
 				continue
 			}
-			messageId = proto_sentry.MessageId_GET_BLOCK_HEADERS_66
-			cs.logger.Debug("[SendHeaderRequest] Encoded ETH/66+ request",
-				"messageId", messageId.String(),
-				"requestID", requestID,
-				"size", len(bytes),
-				"number", req.Number,
-				"hash", hash.Hex(), // Log the actual hash being used
-				"sentryIndex", i,
-				"protocol", protocol.String(),
-				"usingHash", hash != (common.Hash{}))
 
-		default:
-			cs.logger.Error("Unsupported protocol", "protocol", protocol.String(), "sentryIndex", i)
-			continue
+			outreq := proto_sentry.SendMessageByMinBlockRequest{
+				MinBlock: req.Number,
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   messageId,
+					Data: bytes,
+				},
+				MaxPeers: uint64(maxPeers),
+			}
+
+			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				// Only log errors, not "no peers" cases (those are logged by SendMessageByMinBlock)
+				cs.logger.Warn("Could not send header request",
+					"protocol", protocol.String(),
+					"messageId", messageId.String(),
+					"sentryIndex", i,
+					"err", err)
+				continue
+			}
+
+			// Check for empty peers - if we got peers, this protocol version works!
+			// if sentPeers != nil && len(sentPeers.Peers) > 0 {
+			// 	successfulProtocol = protocol
+			// 	successfulMessageId = messageId
+			// 	break // Found a working protocol version
+			// }
 		}
 
-		// Log request details for debugging
-		cs.logger.Debug("Sending header request",
-			"protocol", protocol.String(),
-			"messageId", messageId.String(),
-			"number", req.Number,
-			"hash", hash.Hex(), // Log the actual hash being used
-			"sentryIndex", i)
-
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
-			MinBlock: req.Number,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   messageId,
-				Data: bytes,
-			},
-			MaxPeers: uint64(maxPeers),
-		}
-
-		sentPeers, err := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
-		if err != nil {
-			cs.logger.Error("Could not send header request",
-				"protocol", protocol.String(),
-				"messageId", messageId.String(),
-				"sentryIndex", i,
-				"err", err,
-				"note", "Sentry may not support this protocol version")
-			continue
-		}
-
+		// If no protocol version succeeded, try next sentry
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
-			cs.logger.Debug("No peers available for header request",
-				"protocol", protocol.String(),
-				"messageId", messageId.String(),
-				"sentryIndex", i)
 			continue
 		}
 
+		// Now safe to access sentPeers.Peers[0]
 		peerID := sentry.ConvertH512ToPeerID(sentPeers.Peers[0])
-		cs.logger.Info("Sent header request to peer",
-			"protocol", protocol.String(),
-			"messageId", messageId.String(),
-			"peer", fmt.Sprintf("%x", peerID[:8]),
-			"sentryIndex", i,
-			"peerCount", len(sentPeers.Peers),
-			"number", req.Number,
-			"hash", req.Hash.Hex())
+
+		// Get peer name for logging (only on Info level to reduce overhead)
+		// peerName := cs.getPeerName(ctx, cs.sentries[i], sentPeers.Peers[0])
+
+		// cs.logger.Info("Sent header request to peer",
+		// 	"protocol", successfulProtocol.String(),
+		// 	"messageId", successfulMessageId.String(),
+		// 	"peer", fmt.Sprintf("%x", peerID[:8]),
+		// 	"peerName", peerName,
+		// 	"sentryIndex", i,
+		// 	"number", req.Number,
+		// 	"hash", req.Hash.Hex())
 		return peerID, true
 	}
 
-	// cs.logger.Warn("Failed to send header request to any peer",
-	// 	"sentryCount", len(cs.sentries),
-	// 	"number", req.Number,
-	// 	"hash", req.Hash.Hex())
 	return [64]byte{}, false
 }
 

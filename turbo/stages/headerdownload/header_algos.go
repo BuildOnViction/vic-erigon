@@ -374,16 +374,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 // ReadProgressFromDb updates highestInDb field according to the information
 // in the database. It is useful in the situations when transaction was
 // aborted and highestInDb became out-of-sync
-// func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
-// 	hd.lock.Lock()
-// 	defer hd.lock.Unlock()
-// 	hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
 func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -410,18 +400,15 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
 		if anchor.blockHeight == 0 { //has no parent
-			// hd.logger.Debug("[downloader] RequestMoreHeaders: skipping anchor with height 0", "hash", anchor.parentHash)
 			return true
 		}
 		if anchor.nextRetryTime.After(currentTime) {
 			// We are not ready to retry this anchor yet
-			// hd.logger.Debug("[downloader] RequestMoreHeaders: anchor not ready", "height", anchor.blockHeight, "nextRetry", anchor.nextRetryTime, "currentTime", currentTime)
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRetryNotReady)
 			return true
 		}
 		if anchor.timeouts >= 10 {
 			// Ancestors of this anchor seem to be unavailable, invalidate and move on
-			// hd.logger.Warn("[downloader] RequestMoreHeaders: invalidating anchor (timeouts)", "height", anchor.blockHeight, "timeouts", anchor.timeouts)
 			hd.invalidateAnchor(anchor, "suspected unavailability")
 			// Add header invalidate
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderInvalidated)
@@ -436,7 +423,6 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 			Skip:    0,
 			Reverse: true,
 		}
-		// hd.logger.Info("[downloader] RequestMoreHeaders: created request", "height", req.Number, "hash", req.Hash, "anchorHeight", anchor.blockHeight)
 		// Add header requested
 		return false
 	})
@@ -561,34 +547,14 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
-			// Log which consensus engine is being used
-			consensusType := hd.engine.Type()
-			hd.logger.Info("[downloader] VerifyHeader: using consensus engine",
-				"consensus", consensusType,
-				"hash", link.hash,
-				"height", link.blockHeight)
-
-			err := hd.VerifyHeader(link.header)
-			if err != nil {
-				hd.logger.Error("[downloader] InsertHeader: VerifyHeader error",
-					"hash", link.hash,
-					"height", link.blockHeight,
-					"consensus", consensusType,
-					"err", err)
+			if err := hd.VerifyHeader(link.header); err != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
-					hd.logger.Warn("[downloader] Added future link",
-						"hash", link.hash,
-						"height", link.blockHeight,
-						"timestamp", link.header.Time)
+					hd.logger.Warn("[downloader] Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
-					hd.logger.Debug("[downloader] Verification failed for header",
-						"hash", link.hash,
-						"height", link.blockHeight,
-						"consensus", consensusType,
-						"err", err)
+					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 					hd.removeUpwards(link)
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
@@ -608,7 +574,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
-			fmt.Println("-> InsertHeader: FeedHeaderFunc error", "err", err)
 			return false, false, 0, lastTime, err
 		}
 		// Some blocks may be marked as non-valid on PoS chain because they were far into the future.
@@ -716,7 +681,6 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 }
 
 func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
-	fmt.Println("[downloader] ProcessHeadersPOS", "csHeaders", len(csHeaders), "peerID", common.Bytes2Hex(peerId[:]))
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
@@ -1004,6 +968,13 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 			}
 			// This makes sure we end up choosing the chain with the max total difficulty
 			hi.localTd.Set(td)
+		} else if blockHeight > hi.highest {
+			// Forward sync: update highest even when there's no reorg
+			hi.highest = blockHeight
+			hi.highestHash = hash
+			hi.highestTimestamp = header.Time
+			hi.canonicalCache.Add(blockHeight, hash)
+			hi.localTd.Set(td)
 		}
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
@@ -1077,7 +1048,6 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.logger.Debug("[downloader] ProcessHeader: processing header", "height", sh.Number, "hash", sh.Hash, "parentHash", sh.Header.ParentHash, "highestInDb", hd.highestInDb, "linksCount", len(hd.links), "anchorsCount", hd.anchorTree.Len())
 	if sh.Number > hd.stats.RespMaxBlock {
 		hd.stats.RespMaxBlock = sh.Number
 	}
@@ -1086,7 +1056,6 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 	}
 	if _, ok := hd.links[sh.Hash]; ok {
 		hd.stats.Duplicates++
-		hd.logger.Debug("[downloader] ProcessHeader: duplicate header rejected", "height", sh.Number, "hash", sh.Hash)
 		// Duplicate
 		return false
 	}
@@ -1145,7 +1114,6 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 }
 
 func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
-	fmt.Println("[downloader] ProcessHeaders", "newBlock", newBlock, "peerID", common.Bytes2Hex(peerID[:]))
 	requestMore := false
 	for _, sh := range csHeaders {
 		// Lock is acquired for every invocation of ProcessHeader
@@ -1290,7 +1258,6 @@ func (hd *HeaderDownload) SetRequestId(requestId int) {
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
-	fmt.Println("[downloader] AddMinedHeader", "header", header.Number.Uint64())
 	buf := bytes.NewBuffer(nil)
 	if err := header.EncodeRLP(buf); err != nil {
 		return err

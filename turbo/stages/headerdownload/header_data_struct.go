@@ -415,6 +415,7 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 type HeaderInserter struct {
 	localTd          *big.Int
 	logPrefix        string
+	logger           log.Logger
 	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
 	highestHash      common.Hash
 	newCanonical     bool
@@ -426,10 +427,11 @@ type HeaderInserter struct {
 	headerReader     services.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader, logger log.Logger) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,
+		logger:       logger,
 		unwindPoint:  headerProgress,
 		headerReader: headerReader,
 	}

@@ -225,11 +225,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if txTask.BlockNum == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			if rw.genesis == nil {
-				// Skip genesis processing if genesis is nil
-				rules = &chain.Rules{}
-				break
-			}
 			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
 			if err != nil {
 				panic(err)
