@@ -152,14 +152,14 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	// if latest {
-	// 	fmt.Println("-> latest::2", latest)
-	// 	cacheView, err := stateCache.View(ctx, tx)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	return CreateLatestCachedStateReader(cacheView, tx), nil
-	// }
+	if latest {
+		fmt.Println("-> latest::2", latest)
+		cacheView, err := stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		return CreateLatestCachedStateReader(cacheView, tx), nil
+	}
 	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
