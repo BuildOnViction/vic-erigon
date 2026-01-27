@@ -525,7 +525,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read NewAttestors/BaseFee: %w", err)
 	}
 	h.NewAttestors = make([]byte, len(b))
-	copy(h.NewAttestors[:], b)
+	copy(h.NewAttestors, b)
 
 	if b, err = s.Bytes(); err != nil {
 		if errors.Is(err, rlp.EOL) {
@@ -541,11 +541,36 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Attestor/WithdrawalsHash: %w", err)
 	}
 	h.Attestor = make([]byte, len(b))
-	copy(h.Attestor[:], b)
+	copy(h.Attestor, b)
+
+	// Detect PoSV BEFORE checking the next field type
+	// This prevents ResetPoSVDecodeRLP from clearing the fields we just read
+	if !h.Posv {
+		// Since 2nd epoch onwards, Attestor always be a signature
+		if len(h.Attestor) == 65 {
+			h.Posv = true
+		}
+		// In 1st epoch, all PoSV fields are empty, and BaseFee must not be empty.
+		if len(h.NewAttestors) == 0 && len(h.Attestor) == 0 {
+			h.Posv = true
+		}
+		// If NewAttestors (Validators) has data, it's a PoSV block with validators (from Geth/TomoChain)
+		if len(h.NewAttestors) > 0 {
+			h.Posv = true
+		}
+	}
 
 	kind, _, err = s.Kind()
 	if err != nil {
 		if errors.Is(err, rlp.EOL) {
+			// If PoSV is detected, we should have Penalties field, but it's missing
+			if h.Posv {
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no Penalties): %w", err)
+				}
+				return nil
+			}
+			// Not PoSV, reset the fields
 			err := h.ResetPoSVDecodeRLP(2)
 			if err != nil {
 				return err
@@ -558,23 +583,16 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Penalties/BlobGasUsed: %w", err)
 	}
 	if kind != rlp.String {
+		// If PoSV is detected, we expect Penalties to be a string
+		if h.Posv {
+			return fmt.Errorf("read Penalties: expected string, got %v", kind)
+		}
+		// Not PoSV, reset the fields
 		err := h.ResetPoSVDecodeRLP(2)
 		if err != nil {
 			return err
 		}
 		return fmt.Errorf("read Penalties/BlobGasUsed: %w", rlp.ErrExpectedString)
-	}
-
-	// Retry PoSV
-	if !h.Posv {
-		// Since 2nd epoch onwards, Attestor always be a signature
-		if len(h.Attestor) == 65 {
-			h.Posv = true
-		}
-		// In 1st epoch, all PoSV fields are empty, and BaseFee must not be empty.
-		if len(h.NewAttestors) == 0 && len(h.Attestor) == 0 {
-			h.Posv = true
-		}
 	}
 
 	if h.Posv {
