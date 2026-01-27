@@ -237,8 +237,20 @@ func ExtractValidatorsFromCheckpointHeader(header *types.Header) []common.Addres
 		return []common.Address{}
 	}
 
-	validators := make([]common.Address, (len(header.Extra)-ExtraVanity-ExtraSeal)/int(AddressLength))
-	for i := 0; i < len(validators); i++ {
+	// Check if Extra field has enough bytes for at least ExtraVanity + ExtraSeal
+	if len(header.Extra) < ExtraVanity+ExtraSeal {
+		return []common.Address{}
+	}
+
+	// Calculate number of validators: (total - vanity - seal) / address_length
+	validatorBytes := len(header.Extra) - ExtraVanity - ExtraSeal
+	if validatorBytes < 0 || validatorBytes%int(AddressLength) != 0 {
+		return []common.Address{}
+	}
+
+	validatorCount := validatorBytes / int(AddressLength)
+	validators := make([]common.Address, validatorCount)
+	for i := 0; i < validatorCount; i++ {
 		copy(validators[i][:], header.Extra[ExtraVanity+i*int(AddressLength):])
 	}
 

@@ -19,7 +19,6 @@ package sentry_multi_client
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"strings"
 	"syscall"
@@ -27,7 +26,6 @@ import (
 	"google.golang.org/grpc"
 
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	p2p "github.com/erigontech/erigon-p2p"
@@ -36,63 +34,13 @@ import (
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
-	// fmt.Println("[PropagateNewBlockHashes]::1")
-	// Try different ways to get protocol information
+	// Detect protocol from first available sentry
 	var currentProtocol proto_sentry.Protocol
-	var protocolDetected bool
-
-	// Method 1: Try Protocol() method (returns uint) from sentries
-	for _, sentry := range cs.sentries {
-		if protocolMethod, ok := sentry.(interface{ Protocol() uint }); ok {
-			protocolUint := protocolMethod.Protocol()
-			// Convert uint to proto_sentry.Protocol
-			switch protocolUint {
-			case 63:
-				// fmt.Println("[7s62::PropagateNewBlockHashes] protocolUint 63")
-				currentProtocol = proto_sentry.Protocol_ETH63
-				protocolDetected = true
-				break
-			default:
-				// fmt.Println("[7s62::PropagateNewBlockHashes] protocolUint 67")
-				currentProtocol = proto_sentry.Protocol_ETH67
-				protocolDetected = true
-				break
-			}
-			if protocolDetected {
-				break
-			}
+	for _, s := range cs.sentries {
+		currentProtocol = detectSentryProtocol(ctx, s)
+		if currentProtocol != proto_sentry.Protocol_ETH67 { // Found a specific protocol
+			break
 		}
-	}
-
-	// Method 2: Try GetProtocol() method (returns proto_sentry.Protocol) from sentries
-	if !protocolDetected {
-		// fmt.Println("[7s62::PropagateNewBlockHashes] protocolDetected false")
-		for _, sentry := range cs.sentries {
-			if protocolMethod, ok := sentry.(interface{ GetProtocol() proto_sentry.Protocol }); ok {
-				// fmt.Println("[7s62::PropagateNewBlockHashes] protocolMethod GetProtocol")
-				// fmt.Println("[7s62::PropagateNewBlockHashes] protocolMethod GetProtocol", protocolMethod.GetProtocol())
-				currentProtocol = protocolMethod.GetProtocol()
-				// fmt.Println("[7s62::PropagateNewBlockHashes] currentProtocol", currentProtocol)
-				protocolDetected = true
-				break
-			}
-		}
-	}
-
-	// Method 3: Check context for protocol
-	if !protocolDetected {
-		// fmt.Println("[7s62::PropagateNewBlockHashes] ctxProtocol", ctx.Value("protocol"))
-		if ctxProtocol, ok := ctx.Value("protocol").(proto_sentry.Protocol); ok {
-			// fmt.Println("[7s62::PropagateNewBlockHashes] ctxProtocol ok", ctxProtocol)
-			currentProtocol = ctxProtocol
-			protocolDetected = true
-		}
-	}
-
-	// Default to ETH/67 if no protocol detected
-	if !protocolDetected {
-		// fmt.Println("[7s62::PropagateNewBlockHashes] default to ETH/67")
-		currentProtocol = proto_sentry.Protocol_ETH67
 	}
 
 	// Determine if we should use ETH/63 format
@@ -106,7 +54,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 	data, err := rlp.EncodeToBytes(&typedRequest)
 	if err != nil {
-		log.Error("propagateNewBlockHashes", "err", err)
+		cs.logger.Error("propagateNewBlockHashes", "err", err)
 		return
 	}
 
@@ -134,7 +82,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 		_, err = sentry.SendMessageToAll(ctx, &req, &grpc.EmptyCallOption{})
 		if err != nil {
-			log.Error("propagateNewBlockHashes", "err", err)
+			cs.logger.Error("propagateNewBlockHashes", "err", err)
 		}
 	}
 }
@@ -150,7 +98,7 @@ func min(a, b int) int {
 func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 	if err != nil {
-		log.Error("broadcastNewBlock", "err", err)
+		cs.logger.Error("broadcastNewBlock", "err", err)
 		return
 	}
 
@@ -159,48 +107,17 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		TD:    td,
 	})
 	if err != nil {
-		log.Error("broadcastNewBlock", "err", err)
+		cs.logger.Error("broadcastNewBlock", "err", err)
 		return
 	}
-	fmt.Println("[7s62::BroadcastNewBlock::11] data", data)
-	// Detect protocol version
+
+	// Detect protocol from first available sentry
 	var currentProtocol proto_sentry.Protocol
-	var protocolDetected bool
-
-	// Method 1: Try Protocol() method (returns uint) from sentries
-	for _, sentry := range cs.sentries {
-		if protocolMethod, ok := sentry.(interface{ Protocol() uint }); ok {
-			protocolUint := protocolMethod.Protocol()
-			switch protocolUint {
-			case 63:
-				currentProtocol = proto_sentry.Protocol_ETH63
-				protocolDetected = true
-				break
-			default:
-				currentProtocol = proto_sentry.Protocol_ETH67
-				protocolDetected = true
-				break
-			}
-			if protocolDetected {
-				break
-			}
+	for _, s := range cs.sentries {
+		currentProtocol = detectSentryProtocol(ctx, s)
+		if currentProtocol != proto_sentry.Protocol_ETH67 { // Found a specific protocol
+			break
 		}
-	}
-
-	// Method 2: Try GetProtocol() method (returns proto_sentry.Protocol) from sentries
-	if !protocolDetected {
-		for _, sentry := range cs.sentries {
-			if protocolMethod, ok := sentry.(interface{ GetProtocol() proto_sentry.Protocol }); ok {
-				currentProtocol = protocolMethod.GetProtocol()
-				protocolDetected = true
-				break
-			}
-		}
-	}
-
-	// Default to ETH/67 if no protocol detected
-	if !protocolDetected {
-		currentProtocol = proto_sentry.Protocol_ETH67
 	}
 
 	// Determine message ID based on protocol
@@ -219,8 +136,10 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		},
 	}
 
-	fmt.Printf("[7s62::BroadcastNewBlock] Protocol: %v (value: %d), MessageId: %s (value: %d)\n",
-		currentProtocol.String(), int32(currentProtocol), messageId.String(), int32(messageId))
+	cs.logger.Trace("Broadcasting new block",
+		"protocol", currentProtocol.String(),
+		"messageId", messageId.String(),
+		"blockNumber", header.Number.Uint64())
 
 	for _, sentry := range cs.sentries {
 		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
@@ -230,10 +149,10 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		_, err = sentry.SendMessageToRandomPeers(ctx, &req, &grpc.EmptyCallOption{})
 		if err != nil {
 			if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-				log.Debug("broadcastNewBlock", "err", err)
+				cs.logger.Debug("broadcastNewBlock", "err", err)
 				continue
 			}
-			log.Error("broadcastNewBlock", "err", err)
+			cs.logger.Error("broadcastNewBlock", "err", err)
 		}
 	}
 }
