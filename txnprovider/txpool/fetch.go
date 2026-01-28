@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -29,7 +30,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/eth63"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -136,7 +137,6 @@ func (f *Fetch) ConnectCore() {
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
-	fmt.Println("------> receiveMessageLoop: Starting receiveMessageLoop")
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -163,7 +163,6 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 }
 
 func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryClient) error {
-	fmt.Println("------> receiveMessage: Starting receiveMessage")
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := sentryClient.Messages(streamCtx, &sentry.MessagesRequest{Ids: []sentry.MessageId{
@@ -200,7 +199,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			fmt.Println("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			f.logger.Warn("[txpool.fetch] Error handling incoming message",
+				"req_id", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -209,7 +209,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 }
 
 func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient) (err error) {
-	fmt.Println("------> handleInboundMessage: Starting handleInboundMessage::1", req.Id.String())
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -219,6 +218,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	if !f.pool.Started() {
 		return nil
 	}
+
 	tx, err := f.db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -228,388 +228,403 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	// Convert peer ID for logging
 	peerID := gointerfaces.ConvertH512ToHash(req.PeerId)
 	peerHex := hex.EncodeToString(peerID[:])
-	fmt.Println("------> handleInboundMessage: Starting handleInboundMessage", req.Id.String())
+	fmt.Println("------> handleInboundMessage: peerHex", peerHex)
+
 	switch req.Id {
 	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
-		// STEP 1: Node 2 receives transaction hashes from Node 1
-		f.logger.Info("[NODE2] 📨 STEP 1: Received transaction hashes from peer",
-			"peer_id", peerHex,
-			"data_size", len(req.Data),
-			"message_type", "NEW_POOLED_TRANSACTION_HASHES_66")
-
-		hashCount, pos, err := ParseHashesCount(req.Data, 0)
-		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
-		}
-
-		f.logger.Info("[NODE2] 🏷️ Parsed transaction hashes",
-			"hash_count", hashCount)
-
-		hashes := make([]byte, 32*hashCount)
-		for i := 0; i < len(hashes); i += 32 {
-			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
-				return err
-			}
-		}
-
-		// Log each hash received
-		for i := 0; i < hashCount; i++ {
-			hash := hashes[i*32 : (i+1)*32]
-			f.logger.Info("[NODE2] 🔍 Received transaction hash",
-				"hash_index", i+1,
-				"hash", hex.EncodeToString(hash))
-		}
-
-		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
-		if err != nil {
-			return err
-		}
-
-		f.logger.Info("[NODE2] 🔍 Filtered unknown hashes",
-			"total_hashes", hashCount,
-			"unknown_hashes", len(unknownHashes)/32)
-
-		if len(unknownHashes) > 0 {
-			// STEP 2: Node 2 requests full transactions from Node 1
-			f.logger.Info("[NODE2]  STEP 2: Requesting full transactions from peer",
-				"peer_id", peerHex,
-				"unknown_count", len(unknownHashes)/32)
-
-			var encodedRequest []byte
-			var messageID sentry.MessageId
-			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
-			}
-			messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
-
-			// Log the request details
-			f.logger.Info("[NODE2] Sending GET_POOLED_TRANSACTIONS_66 request",
-				"peer_id", peerHex,
-				"request_size", len(encodedRequest),
-				"request_id", uint64(1))
-
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-				Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
-				PeerId: req.PeerId,
-			}, &grpc.EmptyCallOption{}); err != nil {
-				f.logger.Error("[NODE2] ❌ Failed to send GET_POOLED_TRANSACTIONS_66 request",
-					"peer_id", peerHex,
-					"error", err)
-				return err
-			}
-
-			f.logger.Info("[NODE2] ✅ Successfully sent GET_POOLED_TRANSACTIONS_66 request",
-				"peer_id", peerHex)
-		} else {
-			f.logger.Info("[NODE2] ℹ️ All transaction hashes already known, no request needed")
-		}
+		return f.handleNewPooledTransactionHashes66(ctx, req, sentryClient, tx, peerHex)
 
 	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
-		// Handle eth/68 transaction hash announcements
-		f.logger.Info("[NODE2] 📨 Received NEW_POOLED_TRANSACTION_HASHES_68 from peer",
-			"peer_id", peerHex,
-			"data_size", len(req.Data))
-
-		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
-		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
-		}
-		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
-		if err != nil {
-			return err
-		}
-
-		if len(unknownHashes) > 0 {
-			var encodedRequest []byte
-			var messageID sentry.MessageId
-			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
-			}
-			messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-				Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
-				PeerId: req.PeerId,
-			}, &grpc.EmptyCallOption{}); err != nil {
-				return err
-			}
-		}
+		return f.handleNewPooledTransactionHashes68(ctx, req, sentryClient, tx, peerHex)
 
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
-		// STEP 3: Node 2 receives a request for transactions (when acting as Node 1)
-		f.logger.Info("[NODE2] 📥 STEP 3: Received GET_POOLED_TRANSACTIONS_66 request from peer",
-			"peer_id", peerHex,
-			"data_size", len(req.Data))
-
-		var encodedRequest []byte
-		var messageID sentry.MessageId
-		messageID = sentry.MessageId_POOLED_TRANSACTIONS_66
-		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
-		if err != nil {
-			return err
-		}
-
-		f.logger.Info("[NODE2] 🔍 Processing GET_POOLED_TRANSACTIONS_66 request",
-			"peer_id", peerHex,
-			"request_id", requestID,
-			"hash_count", len(hashes)/32)
-
-		// limit to max 256 transactions in a reply
-		const hashSize = 32
-		hashes = hashes[:min(len(hashes), 256*hashSize)]
-
-		var txns [][]byte
-		responseSize := 0
-		processed := len(hashes)
-
-		for i := 0; i < len(hashes); i += hashSize {
-			if responseSize >= p2pTxPacketLimit {
-				processed = i
-				log.Trace("txpool.Fetch.handleInboundMessage PooledTransactions reply truncated to fit p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
-				break
-			}
-
-			txnHash := hashes[i:min(i+hashSize, len(hashes))]
-			txn, err := f.pool.GetRlp(tx, txnHash)
-			if err != nil {
-				return err
-			}
-			if txn == nil {
-				f.logger.Warn("[NODE2] ⚠️ Transaction not found in pool",
-					"hash", hex.EncodeToString(txnHash))
-				continue
-			}
-
-			f.logger.Info("[NODE2] ✅ Found transaction in pool",
-				"hash", hex.EncodeToString(txnHash),
-				"txn_size", len(txn))
-
-			txns = append(txns, txn)
-			responseSize += len(txn)
-		}
-
-		f.logger.Info("[NODE2] 📤 Preparing POOLED_TRANSACTIONS_66 response",
-			"peer_id", peerHex,
-			"request_id", requestID,
-			"found_txns", len(txns),
-			"response_size", responseSize)
-
-		encodedRequest = EncodePooledTransactions66(txns, requestID, nil)
-		if len(encodedRequest) > p2pTxPacketLimit {
-			log.Trace("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
-		}
-
-		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
-			PeerId: req.PeerId,
-		}, &grpc.EmptyCallOption{}); err != nil {
-			f.logger.Error("[NODE2] ❌ Failed to send POOLED_TRANSACTIONS_66 response",
-				"peer_id", peerHex,
-				"error", err)
-			return err
-		}
-
-		f.logger.Info("[NODE2] ✅ Successfully sent POOLED_TRANSACTIONS_66 response",
-			"peer_id", peerHex,
-			"response_size", len(encodedRequest))
+		return f.handleGetPooledTransactions66(ctx, req, sentryClient, tx, peerHex)
 
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
-		// STEP 4: Node 2 receives full transactions from Node 1
-		messageType := "TRANSACTIONS_66"
-		if req.Id == sentry.MessageId_POOLED_TRANSACTIONS_66 {
-			messageType = "POOLED_TRANSACTIONS_66"
-		}
+		return f.handlePooledTransactions66(ctx, req, tx, peerHex)
 
-		f.logger.Info("[NODE2] 💰 STEP 4: Received full transactions from peer",
-			"peer_id", peerHex,
-			"message_type", messageType,
-			"data_size", len(req.Data))
-
-		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			return nil
-		}); err != nil {
-			return err
-		}
-
-		switch req.Id {
-		case sentry.MessageId_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
-					known, err := f.pool.IdHashKnown(tx, hash)
-					if err != nil {
-						return err
-					}
-					if known {
-						return ErrRejected
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		case sentry.MessageId_POOLED_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
-					known, err := f.pool.IdHashKnown(tx, hash)
-					if err != nil {
-						return err
-					}
-					if known {
-						return ErrRejected
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unexpected message: %s", req.Id.String())
-		}
-
-		f.logger.Info("[NODE2] 📊 Parsed transactions",
-			"transaction_count", len(txns.Txns))
-
-		if len(txns.Txns) == 0 {
-			f.logger.Info("[NODE2] ℹ️ No new transactions to add to pool")
-			return nil
-		}
-
-		f.pool.AddRemoteTxns(ctx, txns)
-		f.logger.Info("[NODE2] ✅ STEP 4 COMPLETE: Added transactions to pool",
-			"added_count", len(txns.Txns),
-			"peer_id", peerHex)
-
-		// Around line 489-538, replace the entire case block:
 	case sentry.MessageId_TRANSACTIONS_63:
-		fmt.Println("------> handleInboundMessage: Received ETH63 transaction")
-		f.logger.Info("[NODE2] 💰 Received ETH/63 transactions from peer",
-			"peer_id", peerHex,
-			"data_size", len(req.Data))
-
-		// Decode ETH/63 transactions as ETH63Transactions (list of transactions)
-		var eth63Txs eth63.ETH63Transactions
-		if err := rlp.DecodeBytes(req.Data, &eth63Txs); err != nil {
-			fmt.Printf("❌ Failed to decode ETH/63 transactions: %v\n", err)
-			f.logger.Error("[txpool.fetch] Failed to decode ETH/63 transactions",
-				"err", err,
-				"peer_id", peerHex,
-				"data_size", len(req.Data),
-				"data_preview", fmt.Sprintf("%x", req.Data[:min(100, len(req.Data))]))
-			return fmt.Errorf("failed to decode ETH/63 transactions: %w", err)
-		}
-
-		f.logger.Info("[txpool.fetch] Decoded ETH/63 transactions",
-			"count", len(eth63Txs),
-			"peer_id", peerHex)
-
-		if len(eth63Txs) == 0 {
-			f.logger.Info("[txpool.fetch] No transactions in ETH/63 message")
-			return nil
-		}
-
-		// Convert ETH/63 transactions to TxnSlots and add to pool
-		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			// Resize to accommodate all transactions
-			txns.Resize(uint(len(eth63Txs)))
-
-			for i, eth63Tx := range eth63Txs {
-				// Encode ETH/63 transaction to RLP bytes
-				txRlp, err := rlp.EncodeToBytes(eth63Tx)
-				if err != nil {
-					f.logger.Error("[txpool.fetch] Failed to encode ETH/63 transaction to RLP",
-						"index", i, "err", err)
-					// Skip this transaction
-					txns.Resize(uint(i))
-					break
-				}
-
-				// Initialize TxnSlot
-				txns.Txns[i] = &TxnSlot{}
-
-				// Parse the RLP into TxnSlot
-				// ETH/63 transactions are legacy format (no envelope, no blobs)
-				_, err = parseContext.ParseTransaction(txRlp, 0, txns.Txns[i], txns.Senders.At(i),
-					false /* hasEnvelope */, false, /* wrappedWithBlobs */
-					func(hash []byte) error {
-						// Check if transaction is already known
-						known, err := f.pool.IdHashKnown(tx, hash)
-						if err != nil {
-							return err
-						}
-						if known {
-							return ErrRejected
-						}
-						return nil
-					})
-				if err != nil {
-					if errors.Is(err, ErrRejected) {
-						// Transaction already known, skip it
-						f.logger.Debug("[txpool.fetch] ETH/63 transaction already known",
-							"index", i, "hash", fmt.Sprintf("%x", eth63Tx.Hash()))
-						txns.Resize(uint(i))
-						break
-					}
-					f.logger.Error("[txpool.fetch] Failed to parse ETH/63 transaction",
-						"index", i, "hash", fmt.Sprintf("%x", eth63Tx.Hash()), "err", err)
-					// Remove this transaction from the list
-					txns.Resize(uint(i))
-					break
-				}
-
-				// Mark as remote transaction
-				txns.IsLocal[i] = false
-
-				// Log details for first few transactions
-				if i < 5 {
-					f.logger.Debug("[txpool.fetch] Parsed ETH/63 transaction",
-						"index", i,
-						"hash", fmt.Sprintf("%x", eth63Tx.Hash()),
-						"nonce", eth63Tx.Nonce(),
-						"gas", eth63Tx.Gas(),
-						"gasPrice", eth63Tx.GasPrice().String(),
-						"value", eth63Tx.Value().String())
-				}
-			}
-
-			return nil
-		}); err != nil {
-			return err
-		}
-
-		// Resize to actual number of successfully parsed transactions
-		actualCount := len(txns.Txns)
-		for i := 0; i < actualCount; i++ {
-			if txns.Txns[i] == nil {
-				actualCount = i
-				break
-			}
-		}
-		txns.Resize(uint(actualCount))
-
-		if len(txns.Txns) == 0 {
-			f.logger.Info("[txpool.fetch] No valid ETH/63 transactions to add")
-			return nil
-		}
-
-		// Add transactions to pool
-		f.pool.AddRemoteTxns(ctx, txns)
-		f.logger.Info("[txpool.fetch] ✅ Added ETH/63 transactions to pool",
-			"added_count", len(txns.Txns),
-			"peer_id", peerHex)
-		return nil
+		fmt.Println("------> handleInboundMessage: TRANSACTIONS_63")
+		return f.handleTransactions63(ctx, req, tx, peerHex)
 
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
 
 	return nil
+}
+
+// handleNewPooledTransactionHashes66 handles NEW_POOLED_TRANSACTION_HASHES_66 messages
+func (f *Fetch) handleNewPooledTransactionHashes66(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient, tx kv.Tx, peerHex string) error {
+	f.logger.Info("[txpool.fetch] Received NEW_POOLED_TRANSACTION_HASHES_66",
+		"peer_id", peerHex,
+		"data_size", len(req.Data))
+
+	hashCount, pos, err := ParseHashesCount(req.Data, 0)
+	if err != nil {
+		return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
+	}
+
+	hashes := make([]byte, 32*hashCount)
+	for i := 0; i < len(hashes); i += 32 {
+		if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
+			return err
+		}
+	}
+
+	unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+	if err != nil {
+		return err
+	}
+
+	if len(unknownHashes) > 0 {
+		encodedRequest, err := EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil)
+		if err != nil {
+			return err
+		}
+
+		if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+			Data:   &sentry.OutboundMessageData{Id: sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
+			PeerId: req.PeerId,
+		}, &grpc.EmptyCallOption{}); err != nil {
+			f.logger.Error("[txpool.fetch] Failed to send GET_POOLED_TRANSACTIONS_66 request",
+				"peer_id", peerHex, "error", err)
+			return err
+		}
+
+		f.logger.Info("[txpool.fetch] Requested transactions",
+			"peer_id", peerHex,
+			"unknown_count", len(unknownHashes)/32)
+	}
+
+	return nil
+}
+
+// handleNewPooledTransactionHashes68 handles NEW_POOLED_TRANSACTION_HASHES_68 messages
+func (f *Fetch) handleNewPooledTransactionHashes68(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient, tx kv.Tx, peerHex string) error {
+	f.logger.Info("[txpool.fetch] Received NEW_POOLED_TRANSACTION_HASHES_68",
+		"peer_id", peerHex,
+		"data_size", len(req.Data))
+
+	_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
+	if err != nil {
+		return fmt.Errorf("parsing NewPooledTransactionHashes68: %w", err)
+	}
+
+	unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+	if err != nil {
+		return err
+	}
+
+	if len(unknownHashes) > 0 {
+		encodedRequest, err := EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil)
+		if err != nil {
+			return err
+		}
+
+		if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+			Data:   &sentry.OutboundMessageData{Id: sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
+			PeerId: req.PeerId,
+		}, &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// handleGetPooledTransactions66 handles GET_POOLED_TRANSACTIONS_66 requests
+func (f *Fetch) handleGetPooledTransactions66(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient, tx kv.Tx, peerHex string) error {
+	f.logger.Info("[txpool.fetch] Received GET_POOLED_TRANSACTIONS_66 request",
+		"peer_id", peerHex,
+		"data_size", len(req.Data))
+
+	requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
+	if err != nil {
+		return err
+	}
+
+	// Limit to max 256 transactions in a reply
+	const hashSize = 32
+	hashes = hashes[:min(len(hashes), 256*hashSize)]
+
+	var txns [][]byte
+	responseSize := 0
+	processed := len(hashes)
+
+	for i := 0; i < len(hashes); i += hashSize {
+		if responseSize >= p2pTxPacketLimit {
+			processed = i
+			f.logger.Trace("[txpool.fetch] PooledTransactions reply truncated",
+				"requested", len(hashes), "processed", processed)
+			break
+		}
+
+		txnHash := hashes[i:min(i+hashSize, len(hashes))]
+		txn, err := f.pool.GetRlp(tx, txnHash)
+		if err != nil {
+			return err
+		}
+		if txn == nil {
+			continue
+		}
+
+		txns = append(txns, txn)
+		responseSize += len(txn)
+	}
+
+	encodedResponse := EncodePooledTransactions66(txns, requestID, nil)
+	if len(encodedResponse) > p2pTxPacketLimit {
+		f.logger.Trace("[txpool.fetch] PooledTransactions reply exceeds limit",
+			"requested", len(hashes), "processed", processed)
+	}
+
+	if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+		Data:   &sentry.OutboundMessageData{Id: sentry.MessageId_POOLED_TRANSACTIONS_66, Data: encodedResponse},
+		PeerId: req.PeerId,
+	}, &grpc.EmptyCallOption{}); err != nil {
+		f.logger.Error("[txpool.fetch] Failed to send POOLED_TRANSACTIONS_66 response",
+			"peer_id", peerHex, "error", err)
+		return err
+	}
+
+	f.logger.Info("[txpool.fetch] Sent POOLED_TRANSACTIONS_66 response",
+		"peer_id", peerHex,
+		"request_id", requestID,
+		"txn_count", len(txns),
+		"response_size", len(encodedResponse))
+
+	return nil
+}
+
+// handlePooledTransactions66 handles POOLED_TRANSACTIONS_66 and TRANSACTIONS_66 messages
+func (f *Fetch) handlePooledTransactions66(ctx context.Context, req *sentry.InboundMessage, tx kv.Tx, peerHex string) error {
+	messageType := "TRANSACTIONS_66"
+	if req.Id == sentry.MessageId_POOLED_TRANSACTIONS_66 {
+		messageType = "POOLED_TRANSACTIONS_66"
+	}
+
+	f.logger.Info("[txpool.fetch] Received transactions",
+		"peer_id", peerHex,
+		"message_type", messageType,
+		"data_size", len(req.Data))
+
+	txns := TxnSlots{}
+	validateHash := func(hash []byte) error {
+		known, err := f.pool.IdHashKnown(tx, hash)
+		if err != nil {
+			return err
+		}
+		if known {
+			return ErrRejected
+		}
+		return nil
+	}
+
+	if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
+		switch req.Id {
+		case sentry.MessageId_TRANSACTIONS_66:
+			_, err := ParseTransactions(req.Data, 0, parseContext, &txns, validateHash)
+			return err
+		case sentry.MessageId_POOLED_TRANSACTIONS_66:
+			_, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, validateHash)
+			return err
+		default:
+			return fmt.Errorf("unexpected message: %s", req.Id.String())
+		}
+	}); err != nil {
+		return err
+	}
+
+	if len(txns.Txns) == 0 {
+		f.logger.Info("[txpool.fetch] No new transactions to add")
+		return nil
+	}
+
+	f.pool.AddRemoteTxns(ctx, txns)
+	f.logger.Info("[txpool.fetch] Added transactions to pool",
+		"peer_id", peerHex,
+		"added_count", len(txns.Txns))
+
+	return nil
+}
+
+// handleTransactions63 handles TRANSACTIONS_63 (ETH/63) messages
+func (f *Fetch) handleTransactions63(ctx context.Context, req *sentry.InboundMessage, tx kv.Tx, peerHex string) error {
+	f.logger.Info("[txpool.fetch] Received ETH/63 transactions",
+		"peer_id", peerHex,
+		"data_size", len(req.Data))
+
+	// ETH/63 TransactionsMsg payload is an RLP list of transactions.
+	// For PoSV ETH/63, these are expected to be legacy transactions (RLP list per txn, no typed envelope).
+	s := rlp.NewStream(bytes.NewReader(req.Data), uint64(len(req.Data)))
+	_, err := s.List()
+	if err != nil {
+		f.logger.Error("[txpool.fetch] Failed to open ETH/63 transactions list", "err", err, "peer_id", peerHex)
+		return fmt.Errorf("decode ETH/63 tx list: %w", err)
+	}
+
+	rawTxs := make([][]byte, 0, 16)
+	for {
+		raw, err := s.Raw()
+		if err != nil {
+			if errors.Is(err, rlp.EOL) {
+				break
+			}
+			f.logger.Error("[txpool.fetch] Failed to read ETH/63 tx raw RLP", "err", err, "peer_id", peerHex)
+			return fmt.Errorf("decode ETH/63 tx raw: %w", err)
+		}
+		rawTxs = append(rawTxs, raw)
+	}
+
+	if err := s.ListEnd(); err != nil {
+		f.logger.Error("[txpool.fetch] Failed to close ETH/63 transactions list", "err", err, "peer_id", peerHex)
+		return fmt.Errorf("decode ETH/63 tx list end: %w", err)
+	}
+
+	if len(rawTxs) == 0 {
+		f.logger.Info("[txpool.fetch] No transactions in ETH/63 message")
+		return nil
+	}
+
+	// Decode using erigon-lib/types (transaction.go) for visibility/debugging.
+	// Note: txpool parsing below is still the source of truth for slot classification.
+	if dbg.Enabled(ctx) {
+		for i, raw := range rawTxs {
+			txObj, decErr := types.DecodeTransaction(raw)
+			if decErr != nil {
+				f.logger.Warn("[txpool.fetch] types.DecodeTransaction failed for ETH/63 tx",
+					"peer_id", peerHex, "index", i, "err", decErr)
+				continue
+			}
+			f.logger.Debug("[txpool.fetch] ETH/63 tx decoded via erigon-lib/types",
+				"peer_id", peerHex, "index", i, "hash", txObj.Hash().Hex(), "type", txObj.Type())
+		}
+	}
+
+	f.logger.Info("[txpool.fetch] Decoded ETH/63 transactions",
+		"count", len(rawTxs),
+		"peer_id", peerHex)
+
+	// Convert ETH/63 transactions to TxnSlots
+	txns := TxnSlots{}
+	if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
+		txns.Resize(uint(len(rawTxs)))
+
+		for i, txRlp := range rawTxs {
+
+			// Initialize TxnSlot
+			txns.Txns[i] = &TxnSlot{}
+
+			// Parse the RLP into TxnSlot
+			// ETH/63 transactions are legacy format (no envelope, no blobs)
+			_, err = parseContext.ParseTransaction(txRlp, 0, txns.Txns[i], txns.Senders.At(i),
+				false /* hasEnvelope */, false, /* wrappedWithBlobs */
+				func(hash []byte) error {
+					known, err := f.pool.IdHashKnown(tx, hash)
+					if err != nil {
+						return err
+					}
+					if known {
+						return ErrRejected
+					}
+					return nil
+				})
+			if err != nil {
+				if errors.Is(err, ErrRejected) {
+					f.logger.Debug("[txpool.fetch] ETH/63 transaction already known",
+						"index", i)
+					txns.Resize(uint(i))
+					return nil
+				}
+				f.logger.Error("[txpool.fetch] Failed to parse ETH/63 transaction",
+					"index", i, "err", err)
+				txns.Resize(uint(i))
+				return err
+			}
+
+			// Log transaction details (structured)
+			txTypeName := f.getTransactionTypeName(txns.Txns[i].Type)
+			toStr := "<contract_creation>"
+			if txns.Txns[i].Creation == false {
+				// Note: TxnSlot doesn't carry To address; keep placeholder to avoid wrong info
+				toStr = "<unknown>"
+			}
+			f.logger.Info("[p2p.txpool] received transaction (eth/63)",
+				"peer_id", peerHex,
+				"tx_index", i,
+				"tx_hash", fmt.Sprintf("%x", txns.Txns[i].IDHash[:]),
+				"tx_type", txTypeName,
+				"tx_type_num", txns.Txns[i].Type,
+				"from", fmt.Sprintf("%x", txns.Senders.At(i)),
+				"to", toStr,
+				"nonce", txns.Txns[i].Nonce,
+				"gas", txns.Txns[i].Gas,
+				"value", &txns.Txns[i].Value,
+				"gas_price", &txns.Txns[i].Tip, // for legacy Tip==GasPrice
+				"tip_cap", &txns.Txns[i].Tip,
+				"fee_cap", &txns.Txns[i].FeeCap,
+			)
+
+			// Validate: ETH/63 transactions MUST be legacy type
+			if txns.Txns[i].Type != LegacyTxnType {
+				f.logger.Warn("[txpool.fetch] ETH/63 transaction incorrectly classified",
+					"index", i,
+					"parsed_type", txns.Txns[i].Type,
+					"expected_type", LegacyTxnType)
+			}
+
+			// Mark as remote transaction
+			txns.IsLocal[i] = false
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Resize to actual number of successfully parsed transactions
+	actualCount := len(txns.Txns)
+	for i := 0; i < actualCount; i++ {
+		if txns.Txns[i] == nil {
+			actualCount = i
+			break
+		}
+	}
+	txns.Resize(uint(actualCount))
+
+	if len(txns.Txns) == 0 {
+		f.logger.Info("[txpool.fetch] No valid ETH/63 transactions to add")
+		return nil
+	}
+
+	// Add transactions to pool
+	f.pool.AddRemoteTxns(ctx, txns)
+	f.logger.Info("[txpool.fetch] Added ETH/63 transactions to pool",
+		"peer_id", peerHex,
+		"added_count", len(txns.Txns))
+
+	return nil
+}
+
+// getTransactionTypeName returns a human-readable name for transaction type
+func (f *Fetch) getTransactionTypeName(txType byte) string {
+	switch txType {
+	case LegacyTxnType:
+		return "legacy"
+	case AccessListTxnType:
+		return "access_list"
+	case DynamicFeeTxnType:
+		return "eip1559"
+	case BlobTxnType:
+		return "blob"
+	case SetCodeTxnType:
+		return "set_code"
+	case AATxnType:
+		return "account_abstraction"
+	default:
+		return "unknown"
+	}
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
