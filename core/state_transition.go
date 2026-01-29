@@ -234,11 +234,102 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 				}
 			}
 		}
+		// Around line 237, before the balance check:
 		balance, err := st.state.GetBalance(st.msg.From())
 		if err != nil {
 			return err
 		}
+
+		// txType := "legacy"
+		// if st.feeCap != nil && !st.feeCap.IsZero() {
+		// 	txType = "eip1559"
+		// }
+		// if len(st.msg.BlobHashes()) > 0 {
+		// 	txType = "blob"
+		// }
+		// if len(st.msg.Authorizations()) > 0 {
+		// 	txType = "account_abstraction"
+		// }
+
+		// fmt.Printf("[DEBUG] Balance check for %s: have=%v, want=%v, gas=%d, gasPrice=%v, feeCap=%v, value=%v, txType=%s\n",
+		// 	st.msg.From().Hex(), balance, balanceCheck, st.msg.Gas(), st.gasPrice, st.feeCap, st.value, txType)
+
 		if have, want := balance, balanceCheck; have.Cmp(want) < 0 {
+			// Extra debug for a known failing account/blocks (PoSV legacy tx debugging)
+			targetAccount := common.HexToAddress("0x444a52988A40355f6f55cEf439bc2A5F816B2c00")
+			var blockNum uint64
+			if st.evm != nil {
+				blockNum = st.evm.Context.BlockNumber
+			}
+			if st.msg.From() == targetAccount && (blockNum == 2703 || blockNum == 2686 || blockNum == 2657 || blockNum == 2503) {
+				toStr := "contract_creation"
+				if st.msg.To() != nil {
+					toStr = st.msg.To().Hex()
+				}
+				baseFeeStr := "<nil>"
+				if st.evm != nil && st.evm.Context.BaseFee != nil {
+					baseFeeStr = st.evm.Context.BaseFee.String()
+				}
+				blobBaseFeeStr := "<nil>"
+				if st.evm != nil && st.evm.Context.BlobBaseFee != nil {
+					blobBaseFeeStr = st.evm.Context.BlobBaseFee.String()
+				}
+
+				// Determine transaction type
+				txType := "unknown"
+				txTypeNum := -1
+				// Check for blob transactions first
+				if len(st.msg.BlobHashes()) > 0 {
+					txType = "blob"
+					txTypeNum = 3
+				} else if len(st.msg.Authorizations()) > 0 {
+					txType = "account_abstraction"
+					txTypeNum = 5
+				} else if st.feeCap != nil && st.gasPrice != nil {
+					// Check if it's legacy (feeCap == gasPrice) or typed transaction
+					if st.feeCap.Eq(st.gasPrice) {
+						// Legacy transaction: feeCap equals gasPrice
+						txType = "legacy"
+						txTypeNum = 0
+					} else {
+						// Typed transaction: check if it has access list
+						accessList := st.msg.AccessList()
+						if len(accessList) > 0 {
+							txType = "access_list"
+							txTypeNum = 1
+						} else {
+							// EIP-1559 transaction: feeCap != gasPrice and no access list
+							txType = "eip1559"
+							txTypeNum = 2
+						}
+					}
+				} else if st.gasPrice != nil {
+					// Only gasPrice, no feeCap - legacy
+					txType = "legacy"
+					txTypeNum = 0
+				}
+
+				// Recompute explicit components for clarity
+				gasU := new(uint256.Int).SetUint64(st.msg.Gas())
+				gasTimesGasPrice, _ := new(uint256.Int).MulOverflow(new(uint256.Int).Set(gasU), st.gasPrice)
+				var gasTimesFeeCap *uint256.Int
+				if st.feeCap != nil {
+					gasTimesFeeCap, _ = new(uint256.Int).MulOverflow(new(uint256.Int).Set(gasU), st.feeCap)
+				}
+
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] ========================================\n")
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] block=%d from=%s to=%s nonce=%d\n", blockNum, st.msg.From().Hex(), toStr, st.msg.Nonce())
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] Transaction Type: %d (%s)\n", txTypeNum, txType)
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] have=%v want=%v\n", &have, want)
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] gas=%d gasPrice=%v feeCap=%v tipCap=%v value=%v\n", st.msg.Gas(), st.gasPrice, st.feeCap, st.tipCap, st.value)
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] baseFee=%s blobBaseFee=%s blobGas=%d maxFeePerBlobGas=%v\n", baseFeeStr, blobBaseFeeStr, st.msg.BlobGas(), st.msg.MaxFeePerBlobGas())
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] gas*gasPrice=%v\n", gasTimesGasPrice)
+				if gasTimesFeeCap != nil {
+					fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] gas*feeCap=%v\n", gasTimesFeeCap)
+				}
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] computed gasVal=%v blobGasVal=%v (buyGas)\n", gasVal, blobGasVal)
+				fmt.Printf("[INSUFFICIENT_FUNDS_DEBUG] ========================================\n")
+			}
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), &have, want)
 		}
 		st.state.SubBalance(st.msg.From(), *gasVal, tracing.BalanceDecreaseGasBuy)

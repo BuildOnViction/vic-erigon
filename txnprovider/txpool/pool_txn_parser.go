@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/eth63"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
@@ -961,11 +960,11 @@ type TxnSlots struct {
 	IsLocal []bool
 }
 
-type TxnSlotsETH63 struct {
-	Txns    []*ETH63TxSlot
-	Senders Addresses
-	IsLocal []bool
-}
+// type TxnSlotsETH63 struct {
+// 	Txns    []*ETH63TxSlot
+// 	Senders Addresses
+// 	IsLocal []bool
+// }
 
 func (s *TxnSlots) Valid() error {
 	if len(s.Txns) != len(s.IsLocal) {
@@ -1055,93 +1054,93 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 
 var addressesGrowth = make([]byte, length.Addr)
 
-// ETH63TxSlot contains ETH/63 specific transaction information
-type ETH63TxSlot struct {
-	// Basic transaction fields
-	Nonce    uint64          // Transaction nonce
-	Gas      uint64          // Gas limit
-	GasPrice uint256.Int     // Gas price (legacy)
-	Value    uint256.Int     // Value transferred
-	To       *common.Address // Recipient address (nil for contract creation)
-	Data     []byte          // Transaction data
+// // ETH63TxSlot contains ETH/63 specific transaction information
+// type ETH63TxSlot struct {
+// 	// Basic transaction fields
+// 	Nonce    uint64          // Transaction nonce
+// 	Gas      uint64          // Gas limit
+// 	GasPrice uint256.Int     // Gas price (legacy)
+// 	Value    uint256.Int     // Value transferred
+// 	To       *common.Address // Recipient address (nil for contract creation)
+// 	Data     []byte          // Transaction data
 
-	// Signature components
-	V uint256.Int // Recovery ID
-	R uint256.Int // Signature component R
-	S uint256.Int // Signature component S
+// 	// Signature components
+// 	V uint256.Int // Recovery ID
+// 	R uint256.Int // Signature component R
+// 	S uint256.Int // Signature component S
 
-	// Computed fields
-	Hash   [32]byte       // Transaction hash
-	Sender common.Address // Sender address (recovered from signature)
+// 	// Computed fields
+// 	Hash   [32]byte       // Transaction hash
+// 	Sender common.Address // Sender address (recovered from signature)
 
-	// Metadata
-	Creation bool   // True if this is a contract creation transaction
-	Size     uint32 // Size of the transaction in bytes
-}
+// 	// Metadata
+// 	Creation bool   // True if this is a contract creation transaction
+// 	Size     uint32 // Size of the transaction in bytes
+// }
 
-// NewETH63TxSlot creates a new ETH63TxSlot from an ETH/63 transaction
-func NewETH63TxSlot(eth63Tx *eth63.ETH63Transaction) (*ETH63TxSlot, error) {
-	slot := &ETH63TxSlot{
-		Nonce:    eth63Tx.Nonce(),
-		Gas:      eth63Tx.Gas(),
-		Value:    uint256.Int{},
-		GasPrice: uint256.Int{},
-		To:       eth63Tx.To(),
-		Data:     eth63Tx.Data(),
-		Creation: eth63Tx.To() == nil,
-		Hash:     eth63Tx.Hash(),
-		Size:     uint32(len(eth63Tx.Data())),
-	}
+// // NewETH63TxSlot creates a new ETH63TxSlot from an ETH/63 transaction
+// func NewETH63TxSlot(eth63Tx *eth63.ETH63Transaction) (*ETH63TxSlot, error) {
+// 	slot := &ETH63TxSlot{
+// 		Nonce:    eth63Tx.Nonce(),
+// 		Gas:      eth63Tx.Gas(),
+// 		Value:    uint256.Int{},
+// 		GasPrice: uint256.Int{},
+// 		To:       eth63Tx.To(),
+// 		Data:     eth63Tx.Data(),
+// 		Creation: eth63Tx.To() == nil,
+// 		Hash:     eth63Tx.Hash(),
+// 		Size:     uint32(len(eth63Tx.Data())),
+// 	}
 
-	// Convert *big.Int to uint256.Int
-	slot.Value.SetFromBig(eth63Tx.Value())
-	slot.GasPrice.SetFromBig(eth63Tx.GasPrice())
+// 	// Convert *big.Int to uint256.Int
+// 	slot.Value.SetFromBig(eth63Tx.Value())
+// 	slot.GasPrice.SetFromBig(eth63Tx.GasPrice())
 
-	// Get signature components
-	v, r, s := eth63Tx.RawSignatureValues()
-	slot.V.SetFromBig(v)
-	slot.R.SetFromBig(r)
-	slot.S.SetFromBig(s)
+// 	// Get signature components
+// 	v, r, s := eth63Tx.RawSignatureValues()
+// 	slot.V.SetFromBig(v)
+// 	slot.R.SetFromBig(r)
+// 	slot.S.SetFromBig(s)
 
-	// Recover sender
-	sender, err := eth63.Sender(eth63.HomesteadSigner{}, eth63Tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to recover sender: %w", err)
-	}
-	slot.Sender = sender
+// 	// Recover sender
+// 	sender, err := eth63.Sender(eth63.HomesteadSigner{}, eth63Tx)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to recover sender: %w", err)
+// 	}
+// 	slot.Sender = sender
 
-	return slot, nil
-}
+// 	return slot, nil
+// }
 
-// ToETH63Transaction converts ETH63TxSlot back to ETH/63 transaction
-func (slot *ETH63TxSlot) ToETH63Transaction() *eth63.ETH63Transaction {
-	var to *common.Address
-	if slot.To != nil {
-		to = slot.To
-	}
+// // ToETH63Transaction converts ETH63TxSlot back to ETH/63 transaction
+// func (slot *ETH63TxSlot) ToETH63Transaction() *eth63.ETH63Transaction {
+// 	var to *common.Address
+// 	if slot.To != nil {
+// 		to = slot.To
+// 	}
 
-	tx := eth63.NewETH63Transaction(
-		slot.Nonce,
-		*to,
-		slot.Value.ToBig(),
-		slot.Gas,
-		slot.GasPrice.ToBig(),
-		slot.Data,
-	)
+// 	tx := eth63.NewETH63Transaction(
+// 		slot.Nonce,
+// 		*to,
+// 		slot.Value.ToBig(),
+// 		slot.Gas,
+// 		slot.GasPrice.ToBig(),
+// 		slot.Data,
+// 	)
 
-	return tx
-}
+// 	return tx
+// }
 
-// Validate validates the ETH63TxSlot
-func (slot *ETH63TxSlot) Validate() error {
-	if slot.Gas == 0 {
-		return fmt.Errorf("gas cannot be zero")
-	}
-	if slot.GasPrice.IsZero() {
-		return fmt.Errorf("gas price cannot be zero")
-	}
-	if slot.V.IsZero() && slot.R.IsZero() && slot.S.IsZero() {
-		return fmt.Errorf("signature cannot be empty")
-	}
-	return nil
-}
+// // Validate validates the ETH63TxSlot
+// func (slot *ETH63TxSlot) Validate() error {
+// 	if slot.Gas == 0 {
+// 		return fmt.Errorf("gas cannot be zero")
+// 	}
+// 	if slot.GasPrice.IsZero() {
+// 		return fmt.Errorf("gas price cannot be zero")
+// 	}
+// 	if slot.V.IsZero() && slot.R.IsZero() && slot.S.IsZero() {
+// 		return fmt.Errorf("signature cannot be empty")
+// 	}
+// 	return nil
+// }
