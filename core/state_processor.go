@@ -115,6 +115,20 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
+	// VIC-Start
+	if err := CheckVictionBlacklist(config, header, txn); err != nil {
+		return nil, nil, err
+	}
+	if err := ValidateVictionTx(config, nil, ibs, header, txn); err != nil {
+		return nil, nil, err
+	}
+	if receipt, err := ApplyVictionSpecialTx(config, ibs, header, txn, gasUsed); receipt != nil || err != nil {
+		// If handled or error
+		return receipt, nil, err
+	}
+	ApplyVictionBypass(header, txn, ibs, config)
+	// VIC-End
+
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
